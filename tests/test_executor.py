@@ -16,13 +16,13 @@ from django_database_task import (
 from django_database_task.models import DatabaseTask
 
 
-@task()
+@task
 def sample_task(x, y):
     """Sample task for testing."""
     return x + y
 
 
-@task()
+@task
 def failing_task():
     """Task that always fails."""
     raise ValueError("Intentional failure")

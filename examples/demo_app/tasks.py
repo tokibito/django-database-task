@@ -5,20 +5,20 @@ import time
 from django.tasks import task
 
 
-@task()
+@task
 def add_numbers(x, y):
     """Add two numbers together."""
     return x + y
 
 
-@task()
+@task
 def send_email_task(to, subject, body):
     """Simulate sending an email (does not actually send)."""
     time.sleep(1)  # Simulate sending
     return f"Email sent to {to}: {subject}"
 
 
-@task()
+@task
 def process_data(data_size=100):
     """Simulate data processing."""
     result = []
@@ -29,7 +29,7 @@ def process_data(data_size=100):
     return {"processed": len(result), "sum": sum(result)}
 
 
-@task()
+@task
 def failing_task():
     """A task that intentionally fails."""
     raise ValueError("This task is designed to fail!")
