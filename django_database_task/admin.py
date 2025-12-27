@@ -1,5 +1,9 @@
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.db import transaction
+from django.tasks import task_backends
+from django.tasks.base import TaskResultStatus
 from django.utils.html import format_html
+from django.utils.translation import gettext_lazy as _
 
 from .models import DatabaseTask
 
@@ -103,6 +107,105 @@ class DatabaseTaskAdmin(admin.ModelAdmin):
 
     status_badge.short_description = "Status"
 
+    actions = ["run_selected_tasks", "retry_failed_tasks"]
+
     def has_add_permission(self, request):
         """Disable adding tasks from admin."""
         return False
+
+    @admin.action(description=_("Run selected tasks"))
+    def run_selected_tasks(self, request, queryset):
+        """Execute selected tasks that are in READY status."""
+        ready_tasks = queryset.filter(status=TaskResultStatus.READY)
+        ready_count = ready_tasks.count()
+
+        if ready_count == 0:
+            self.message_user(
+                request,
+                "No tasks in READY status were selected.",
+                messages.WARNING,
+            )
+            return
+
+        success_count = 0
+        fail_count = 0
+
+        for db_task in ready_tasks:
+            try:
+                backend = task_backends[db_task.backend_name]
+                result = backend.run_task(db_task, worker_id="admin")
+                if result.status == TaskResultStatus.SUCCESSFUL:
+                    success_count += 1
+                else:
+                    fail_count += 1
+            except Exception:
+                fail_count += 1
+
+        skipped_count = queryset.count() - ready_count
+        msg_parts = []
+        if success_count:
+            msg_parts.append(f"{success_count} succeeded")
+        if fail_count:
+            msg_parts.append(f"{fail_count} failed")
+        if skipped_count:
+            msg_parts.append(f"{skipped_count} skipped (not READY)")
+
+        self.message_user(
+            request,
+            f"Task execution completed: {', '.join(msg_parts)}.",
+            messages.SUCCESS if fail_count == 0 else messages.WARNING,
+        )
+
+    @admin.action(description=_("Retry failed tasks"))
+    def retry_failed_tasks(self, request, queryset):
+        """Reset failed tasks to READY status and re-execute them."""
+        failed_tasks = queryset.filter(status=TaskResultStatus.FAILED)
+        failed_count = failed_tasks.count()
+
+        if failed_count == 0:
+            self.message_user(
+                request,
+                "No tasks in FAILED status were selected.",
+                messages.WARNING,
+            )
+            return
+
+        success_count = 0
+        fail_count = 0
+
+        for db_task in failed_tasks:
+            try:
+                with transaction.atomic():
+                    # Reset task status to READY
+                    db_task.status = TaskResultStatus.READY
+                    db_task.errors_json = []
+                    db_task.started_at = None
+                    db_task.finished_at = None
+                    db_task.return_value_json = None
+                    db_task.save()
+
+                    # Execute the task
+                    backend = task_backends[db_task.backend_name]
+                    result = backend.run_task(db_task, worker_id="admin-retry")
+
+                if result.status == TaskResultStatus.SUCCESSFUL:
+                    success_count += 1
+                else:
+                    fail_count += 1
+            except Exception:
+                fail_count += 1
+
+        skipped_count = queryset.count() - failed_count
+        msg_parts = []
+        if success_count:
+            msg_parts.append(f"{success_count} succeeded")
+        if fail_count:
+            msg_parts.append(f"{fail_count} failed again")
+        if skipped_count:
+            msg_parts.append(f"{skipped_count} skipped (not FAILED)")
+
+        self.message_user(
+            request,
+            f"Retry completed: {', '.join(msg_parts)}.",
+            messages.SUCCESS if fail_count == 0 else messages.WARNING,
+        )

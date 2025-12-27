@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-database-task 0.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-12-27 00:00+0000\n"
+"POT-Creation-Date: 2025-12-27 07:13+0000\n"
 "PO-Revision-Date: 2025-12-27 00:00+0000\n"
 "Last-Translator: Shinya Okano <tokibito@gmail.com>\n"
 "Language-Team: Japanese\n"
@@ -17,146 +17,154 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: models.py
+#: django_database_task/admin.py:116
+msgid "Run selected tasks"
+msgstr "選択したタスクを実行"
+
+#: django_database_task/admin.py:159
+msgid "Retry failed tasks"
+msgstr "失敗したタスクを再実行"
+
+#: django_database_task/models.py:14
 msgid "task path"
 msgstr "タスクパス"
 
-#: models.py
+#: django_database_task/models.py:15
 msgid "Module path of the task function"
 msgstr "タスク関数のモジュールパス"
 
-#: models.py
+#: django_database_task/models.py:20
 msgid "queue name"
 msgstr "キュー名"
 
-#: models.py
+#: django_database_task/models.py:21
 msgid "Queue name"
 msgstr "キュー名"
 
-#: models.py
+#: django_database_task/models.py:25
 msgid "priority"
 msgstr "優先度"
 
-#: models.py
+#: django_database_task/models.py:26
 msgid "Priority (-100 to 100)"
 msgstr "優先度 (-100 から 100)"
 
-#: models.py
+#: django_database_task/models.py:30
 msgid "arguments"
 msgstr "引数"
 
-#: models.py
+#: django_database_task/models.py:31
 msgid "Arguments (JSON format)"
 msgstr "引数 (JSON形式)"
 
-#: models.py
+#: django_database_task/models.py:35
 msgid "keyword arguments"
 msgstr "キーワード引数"
 
-#: models.py
+#: django_database_task/models.py:36
 msgid "Keyword arguments (JSON format)"
 msgstr "キーワード引数 (JSON形式)"
 
-#: models.py
+#: django_database_task/models.py:42
 msgid "status"
 msgstr "ステータス"
 
-#: models.py
+#: django_database_task/models.py:43
 msgid "Task status"
 msgstr "タスクのステータス"
 
-#: models.py
+#: django_database_task/models.py:48
 msgid "run after"
 msgstr "実行開始日時"
 
-#: models.py
+#: django_database_task/models.py:49
 msgid "Earliest execution time"
 msgstr "最も早い実行日時"
 
-#: models.py
+#: django_database_task/models.py:52
 msgid "enqueued at"
 msgstr "キュー登録日時"
 
-#: models.py
+#: django_database_task/models.py:53
 msgid "Time when task was enqueued"
 msgstr "タスクがキューに登録された日時"
 
-#: models.py
+#: django_database_task/models.py:58
 msgid "started at"
 msgstr "開始日時"
 
-#: models.py
+#: django_database_task/models.py:59
 msgid "Execution start time"
 msgstr "実行開始日時"
 
-#: models.py
+#: django_database_task/models.py:64
 msgid "finished at"
 msgstr "終了日時"
 
-#: models.py
+#: django_database_task/models.py:65
 msgid "Execution end time"
 msgstr "実行終了日時"
 
-#: models.py
+#: django_database_task/models.py:70
 msgid "last attempted at"
 msgstr "最終試行日時"
 
-#: models.py
+#: django_database_task/models.py:71
 msgid "Last attempt time"
 msgstr "最終試行日時"
 
-#: models.py
+#: django_database_task/models.py:76
 msgid "return value"
 msgstr "戻り値"
 
-#: models.py
+#: django_database_task/models.py:77
 msgid "Return value (JSON format)"
 msgstr "戻り値 (JSON形式)"
 
-#: models.py
+#: django_database_task/models.py:81
 msgid "errors"
 msgstr "エラー"
 
-#: models.py
+#: django_database_task/models.py:82
 msgid "Error information (JSON format)"
 msgstr "エラー情報 (JSON形式)"
 
-#: models.py
+#: django_database_task/models.py:86
 msgid "worker IDs"
 msgstr "ワーカーID"
 
-#: models.py
+#: django_database_task/models.py:87
 msgid "List of worker IDs (JSON format)"
 msgstr "ワーカーIDのリスト (JSON形式)"
 
-#: models.py
+#: django_database_task/models.py:91
 msgid "backend name"
 msgstr "バックエンド名"
 
-#: models.py
+#: django_database_task/models.py:92
 msgid "Backend name"
 msgstr "バックエンド名"
 
-#: models.py
+#: django_database_task/models.py:96
 msgid "created at"
 msgstr "作成日時"
 
-#: models.py
+#: django_database_task/models.py:97
 msgid "Record creation time"
 msgstr "レコード作成日時"
 
-#: models.py
+#: django_database_task/models.py:101
 msgid "updated at"
 msgstr "更新日時"
 
-#: models.py
+#: django_database_task/models.py:102
 msgid "Record update time"
 msgstr "レコード更新日時"
 
-#: models.py
+#: django_database_task/models.py:116
 msgid "database task"
 msgstr "データベースタスク"
 
-#: models.py
+#: django_database_task/models.py:117
 msgid "database tasks"
 msgstr "データベースタスク"
