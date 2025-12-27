@@ -103,7 +103,6 @@ class DatabaseTask(models.Model):
     )
 
     class Meta:
-        db_table = "django_database_task"
         ordering = ["-priority", "enqueued_at"]
         indexes = [
             models.Index(

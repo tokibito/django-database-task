@@ -3,13 +3,13 @@
 from django.tasks import task
 
 
-@task()
+@task
 def simple_task(x, y):
     """Simple addition task."""
     return x + y
 
 
-@task()
+@task
 def failing_task():
     """Task that always fails."""
     raise ValueError("This task always fails")
@@ -39,7 +39,7 @@ def context_task(context):
     return f"task_id: {context.task_result.id}"
 
 
-@task()
+@task
 def slow_task(seconds=1):
     """Task that takes time to complete."""
     import time
@@ -48,7 +48,7 @@ def slow_task(seconds=1):
     return f"slept for {seconds} seconds"
 
 
-@task()
+@task
 def dict_task(data):
     """Task that receives a dictionary."""
     return data

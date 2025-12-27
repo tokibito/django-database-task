@@ -58,7 +58,7 @@ python manage.py migrate django_database_task
 ```python
 from django.tasks import task
 
-@task()
+@task
 def send_welcome_email(user_id):
     user = User.objects.get(id=user_id)
     # Send email...
@@ -104,13 +104,13 @@ Supported types:
 from django.tasks import task
 
 # ❌ This will raise TypeError
-@task()
+@task
 def bad_task(user_id, created_at):
     pass
 bad_task.enqueue(123, datetime.now())  # TypeError!
 
 # ✅ Convert to JSON-serializable types
-@task()
+@task
 def good_task(user_id, created_at_iso):
     created_at = datetime.fromisoformat(created_at_iso)
     # ...
