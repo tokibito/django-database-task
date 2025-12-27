@@ -1,7 +1,7 @@
 import os
 
 import django
-from django.conf import settings
+import pytest
 
 
 def pytest_configure():
@@ -9,10 +9,7 @@ def pytest_configure():
     django.setup()
 
 
-import pytest
-
-
 @pytest.fixture
 def db_setup(db):
-    """データベースセットアップ用フィクスチャ"""
+    """Database setup fixture."""
     pass

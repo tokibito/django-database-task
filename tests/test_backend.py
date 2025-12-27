@@ -14,7 +14,6 @@ from .tasks import (
     context_task,
     failing_task,
     high_priority_task,
-    low_priority_task,
     simple_task,
     special_queue_task,
 )

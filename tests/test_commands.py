@@ -28,7 +28,9 @@ class TestRunDatabaseTasks:
         out = StringIO()
         call_command("run_database_tasks", stdout=out)
 
-        assert DatabaseTask.objects.filter(status=TaskResultStatus.SUCCESSFUL).count() == 1
+        assert (
+            DatabaseTask.objects.filter(status=TaskResultStatus.SUCCESSFUL).count() == 1
+        )
 
     def test_run_database_tasks_updates_status(self):
         """ステータスが更新される"""
@@ -107,7 +109,9 @@ class TestRunDatabaseTasks:
 
         call_command("run_database_tasks", max_tasks=2, stdout=StringIO())
 
-        assert DatabaseTask.objects.filter(status=TaskResultStatus.SUCCESSFUL).count() == 2
+        assert (
+            DatabaseTask.objects.filter(status=TaskResultStatus.SUCCESSFUL).count() == 2
+        )
         assert DatabaseTask.objects.filter(status=TaskResultStatus.READY).count() == 1
 
     def test_run_database_tasks_no_tasks(self):

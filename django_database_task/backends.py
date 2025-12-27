@@ -1,7 +1,6 @@
 import traceback
 from importlib import import_module
 
-from django.db import transaction
 from django.tasks.backends.base import BaseTaskBackend
 from django.tasks.base import Task, TaskContext, TaskError, TaskResult, TaskResultStatus
 from django.tasks.exceptions import TaskResultDoesNotExist
@@ -47,8 +46,8 @@ class DatabaseTaskBackend(BaseTaskBackend):
 
         try:
             db_task = DatabaseTask.objects.get(id=result_id)
-        except DatabaseTask.DoesNotExist:
-            raise TaskResultDoesNotExist(result_id)
+        except DatabaseTask.DoesNotExist as e:
+            raise TaskResultDoesNotExist(result_id) from e
 
         task = self._resolve_task(db_task.task_path)
         return self._db_task_to_result(db_task, task)
@@ -99,7 +98,6 @@ class DatabaseTaskBackend(BaseTaskBackend):
 
     def run_task(self, db_task, worker_id=None):
         """Execute a task (called from management command)."""
-        from .models import DatabaseTask
 
         now = timezone.now()
 

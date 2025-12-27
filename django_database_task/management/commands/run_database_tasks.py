@@ -85,10 +85,10 @@ class Command(BaseCommand):
                 result = backend.run_task(task, worker_id=worker_id)
                 if result.status == TaskResultStatus.SUCCESSFUL:
                     self.stdout.write(
-                        self.style.SUCCESS(f"  Task completed successfully")
+                        self.style.SUCCESS("  Task completed successfully")
                     )
                 else:
-                    self.stdout.write(self.style.ERROR(f"  Task failed"))
+                    self.stdout.write(self.style.ERROR("  Task failed"))
             except Exception as e:
                 self.stdout.write(self.style.ERROR(f"  Error running task: {e}"))
 
@@ -111,7 +111,9 @@ class Command(BaseCommand):
             )
 
             # run_after condition: NULL or before current time
-            queryset = queryset.filter(Q(run_after__isnull=True) | Q(run_after__lte=now))
+            queryset = queryset.filter(
+                Q(run_after__isnull=True) | Q(run_after__lte=now)
+            )
 
             if queue_name:
                 queryset = queryset.filter(queue_name=queue_name)

@@ -34,15 +34,11 @@ class DatabaseTaskAdmin(admin.ModelAdmin):
     fieldsets = [
         (
             "Basic Information",
-            {
-                "fields": ["id", "task_path", "backend_name", "queue_name", "priority"]
-            },
+            {"fields": ["id", "task_path", "backend_name", "queue_name", "priority"]},
         ),
         (
             "Status",
-            {
-                "fields": ["status", "run_after"]
-            },
+            {"fields": ["status", "run_after"]},
         ),
         (
             "Arguments",
@@ -77,6 +73,7 @@ class DatabaseTaskAdmin(admin.ModelAdmin):
     def id_short(self, obj):
         """Display shortened ID."""
         return str(obj.id)[:8]
+
     id_short.short_description = "ID"
 
     def task_path_short(self, obj):
@@ -85,6 +82,7 @@ class DatabaseTaskAdmin(admin.ModelAdmin):
         if len(path) > 40:
             return f"...{path[-37:]}"
         return path
+
     task_path_short.short_description = "Task"
 
     def status_badge(self, obj):
@@ -102,6 +100,7 @@ class DatabaseTaskAdmin(admin.ModelAdmin):
             color,
             obj.status,
         )
+
     status_badge.short_description = "Status"
 
     def has_add_permission(self, request):
