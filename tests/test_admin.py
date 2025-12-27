@@ -93,7 +93,9 @@ class TestRunSelectedTasksAction:
         queryset = DatabaseTask.objects.filter(id=result.id)
         model_admin.run_selected_tasks(request, queryset)
 
-        assert any("No tasks in READY status" in str(m) for m in request._messages.messages)
+        assert any(
+            "No tasks in READY status" in str(m) for m in request._messages.messages
+        )
 
     def test_handles_failing_tasks(self, model_admin, request_factory, admin_user):
         """Failing tasks are handled properly."""
@@ -190,9 +192,13 @@ class TestRetryFailedTasksAction:
         queryset = DatabaseTask.objects.filter(id=result.id)
         model_admin.retry_failed_tasks(request, queryset)
 
-        assert any("No tasks in FAILED status" in str(m) for m in request._messages.messages)
+        assert any(
+            "No tasks in FAILED status" in str(m) for m in request._messages.messages
+        )
 
-    def test_retry_clears_previous_errors(self, model_admin, request_factory, admin_user):
+    def test_retry_clears_previous_errors(
+        self, model_admin, request_factory, admin_user
+    ):
         """Previous errors are cleared on retry."""
         result = simple_task.enqueue(1, 2)
 
