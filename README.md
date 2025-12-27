@@ -11,6 +11,40 @@ A database-backed task queue backend for Django 6.0's built-in task framework.
 - **Django Admin integration** - View and manage tasks from the admin interface
 - **Async support** - Supports async task functions
 
+## Architecture
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant Backend as DatabaseTaskBackend
+    participant DB as Database
+    participant Worker as Worker Process
+
+    Note over App,Worker: Task Enqueue
+    App->>Backend: task.enqueue(args, kwargs)
+    Backend->>Backend: Validate & serialize args
+    Backend->>DB: INSERT task (status=READY)
+    DB-->>Backend: Task ID
+    Backend-->>App: TaskResult (id, status=READY)
+
+    Note over App,Worker: Task Execution
+    Worker->>DB: SELECT FOR UPDATE SKIP LOCKED<br/>(status=READY, run_after <= now)
+    DB-->>Worker: Task record (with lock)
+    Worker->>DB: UPDATE status=RUNNING
+    Worker->>Worker: Execute task function
+    alt Success
+        Worker->>DB: UPDATE status=SUCCESSFUL,<br/>return_value, finished_at
+    else Failure
+        Worker->>DB: UPDATE status=FAILED,<br/>errors, finished_at
+    end
+
+    Note over App,Worker: Result Retrieval (Optional)
+    App->>Backend: backend.get_result(task_id)
+    Backend->>DB: SELECT task
+    DB-->>Backend: Task record
+    Backend-->>App: TaskResult (status, return_value, errors)
+```
+
 ## Requirements
 
 - Python 3.12+
