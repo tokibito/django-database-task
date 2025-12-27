@@ -85,9 +85,7 @@ class RunTasksView(View):
                 {"error": "max_tasks must be a positive integer"}, status=400
             )
         if max_tasks > 100:
-            return JsonResponse(
-                {"error": "max_tasks cannot exceed 100"}, status=400
-            )
+            return JsonResponse({"error": "max_tasks cannot exceed 100"}, status=400)
 
         results = process_tasks(
             queue_name=queue_name,
@@ -102,7 +100,9 @@ class RunTasksView(View):
                     {
                         "id": str(r.id),
                         "status": r.status.value,
-                        "task_path": r.task.func.__module__ + "." + r.task.func.__qualname__
+                        "task_path": r.task.func.__module__
+                        + "."
+                        + r.task.func.__qualname__
                         if hasattr(r.task, "func")
                         else str(r.task),
                     }

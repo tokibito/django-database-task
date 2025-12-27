@@ -180,9 +180,7 @@ class TestJsonSerialization:
         """Nested dicts and lists are accepted."""
         from tests.tasks import dict_task
 
-        result = dict_task.enqueue(
-            data={"key": "value", "nested": {"list": [1, 2, 3]}}
-        )
+        result = dict_task.enqueue(data={"key": "value", "nested": {"list": [1, 2, 3]}})
         db_task = DatabaseTask.objects.get(id=result.id)
         assert db_task.kwargs_json == {
             "data": {"key": "value", "nested": {"list": [1, 2, 3]}}
