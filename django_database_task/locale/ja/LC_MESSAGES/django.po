@@ -1,0 +1,162 @@
+# Japanese translations for django-database-task.
+# Copyright (C) 2025 Shinya Okano
+# This file is distributed under the same license as the django-database-task package.
+# Shinya Okano <tokibito@gmail.com>, 2025.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: django-database-task 0.1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-12-27 00:00+0000\n"
+"PO-Revision-Date: 2025-12-27 00:00+0000\n"
+"Last-Translator: Shinya Okano <tokibito@gmail.com>\n"
+"Language-Team: Japanese\n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#: models.py
+msgid "task path"
+msgstr "タスクパス"
+
+#: models.py
+msgid "Module path of the task function"
+msgstr "タスク関数のモジュールパス"
+
+#: models.py
+msgid "queue name"
+msgstr "キュー名"
+
+#: models.py
+msgid "Queue name"
+msgstr "キュー名"
+
+#: models.py
+msgid "priority"
+msgstr "優先度"
+
+#: models.py
+msgid "Priority (-100 to 100)"
+msgstr "優先度 (-100 から 100)"
+
+#: models.py
+msgid "arguments"
+msgstr "引数"
+
+#: models.py
+msgid "Arguments (JSON format)"
+msgstr "引数 (JSON形式)"
+
+#: models.py
+msgid "keyword arguments"
+msgstr "キーワード引数"
+
+#: models.py
+msgid "Keyword arguments (JSON format)"
+msgstr "キーワード引数 (JSON形式)"
+
+#: models.py
+msgid "status"
+msgstr "ステータス"
+
+#: models.py
+msgid "Task status"
+msgstr "タスクのステータス"
+
+#: models.py
+msgid "run after"
+msgstr "実行開始日時"
+
+#: models.py
+msgid "Earliest execution time"
+msgstr "最も早い実行日時"
+
+#: models.py
+msgid "enqueued at"
+msgstr "キュー登録日時"
+
+#: models.py
+msgid "Time when task was enqueued"
+msgstr "タスクがキューに登録された日時"
+
+#: models.py
+msgid "started at"
+msgstr "開始日時"
+
+#: models.py
+msgid "Execution start time"
+msgstr "実行開始日時"
+
+#: models.py
+msgid "finished at"
+msgstr "終了日時"
+
+#: models.py
+msgid "Execution end time"
+msgstr "実行終了日時"
+
+#: models.py
+msgid "last attempted at"
+msgstr "最終試行日時"
+
+#: models.py
+msgid "Last attempt time"
+msgstr "最終試行日時"
+
+#: models.py
+msgid "return value"
+msgstr "戻り値"
+
+#: models.py
+msgid "Return value (JSON format)"
+msgstr "戻り値 (JSON形式)"
+
+#: models.py
+msgid "errors"
+msgstr "エラー"
+
+#: models.py
+msgid "Error information (JSON format)"
+msgstr "エラー情報 (JSON形式)"
+
+#: models.py
+msgid "worker IDs"
+msgstr "ワーカーID"
+
+#: models.py
+msgid "List of worker IDs (JSON format)"
+msgstr "ワーカーIDのリスト (JSON形式)"
+
+#: models.py
+msgid "backend name"
+msgstr "バックエンド名"
+
+#: models.py
+msgid "Backend name"
+msgstr "バックエンド名"
+
+#: models.py
+msgid "created at"
+msgstr "作成日時"
+
+#: models.py
+msgid "Record creation time"
+msgstr "レコード作成日時"
+
+#: models.py
+msgid "updated at"
+msgstr "更新日時"
+
+#: models.py
+msgid "Record update time"
+msgstr "レコード更新日時"
+
+#: models.py
+msgid "database task"
+msgstr "データベースタスク"
+
+#: models.py
+msgid "database tasks"
+msgstr "データベースタスク"
