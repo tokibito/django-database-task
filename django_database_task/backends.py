@@ -6,6 +6,7 @@ from django.tasks.base import Task, TaskContext, TaskError, TaskResult, TaskResu
 from django.tasks.exceptions import TaskResultDoesNotExist
 from django.tasks.signals import task_enqueued, task_finished, task_started
 from django.utils import timezone
+from django.utils.json import normalize_json
 
 
 class DatabaseTaskBackend(BaseTaskBackend):
@@ -17,18 +18,33 @@ class DatabaseTaskBackend(BaseTaskBackend):
     supports_priority = True
 
     def enqueue(self, task, args, kwargs):
-        """Enqueue a task to the database."""
+        """Enqueue a task to the database.
+
+        Args and kwargs must be JSON-serializable. Supported types are:
+        - str, int, float, bool, None
+        - dict (with JSON-serializable keys and values)
+        - list, tuple (with JSON-serializable elements)
+        - bytes (UTF-8 decodable)
+
+        Raises:
+            TypeError: If args or kwargs contain non-JSON-serializable types.
+        """
         from .models import DatabaseTask
 
         self.validate_task(task)
+
+        # Normalize args and kwargs to ensure JSON serialization
+        # This will raise TypeError for unsupported types (e.g., datetime, UUID)
+        normalized_args = normalize_json(list(args))
+        normalized_kwargs = normalize_json(dict(kwargs))
 
         now = timezone.now()
         db_task = DatabaseTask.objects.create(
             task_path=self._get_task_path(task),
             queue_name=task.queue_name,
             priority=task.priority,
-            args_json=list(args),
-            kwargs_json=dict(kwargs),
+            args_json=normalized_args,
+            kwargs_json=normalized_kwargs,
             status=TaskResultStatus.READY,
             run_after=task.run_after,
             enqueued_at=now,
@@ -144,9 +160,13 @@ class DatabaseTaskBackend(BaseTaskBackend):
             # Execute task
             return_value = func(*args, **kwargs)
 
+            # Normalize return value for JSON serialization
+            # This will raise TypeError for unsupported types
+            normalized_return_value = normalize_json(return_value)
+
             # Success
             db_task.status = TaskResultStatus.SUCCESSFUL
-            db_task.return_value_json = return_value
+            db_task.return_value_json = normalized_return_value
             db_task.finished_at = timezone.now()
             db_task.save(
                 update_fields=[

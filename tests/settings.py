@@ -32,3 +32,5 @@ TASKS = {
         "OPTIONS": {},
     },
 }
+
+ROOT_URLCONF = "tests.urls"

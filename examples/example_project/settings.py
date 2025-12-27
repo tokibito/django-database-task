@@ -8,7 +8,7 @@ from pathlib import Path
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# django_database_task をパスに追加
+# Add django_database_task to the path
 sys.path.insert(0, str(BASE_DIR.parent))
 
 SECRET_KEY = "example-secret-key-for-development-only"

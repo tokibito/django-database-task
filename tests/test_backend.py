@@ -1,4 +1,4 @@
-"""バックエンドのテスト"""
+"""Tests for the database task backend."""
 
 from datetime import timedelta
 
@@ -22,7 +22,7 @@ from .tasks import (
 @pytest.mark.django_db
 class TestDatabaseTaskBackend:
     def test_enqueue_creates_database_task(self):
-        """enqueueがデータベースにタスクを作成する"""
+        """enqueue creates a database task."""
         result = simple_task.enqueue(1, 2)
 
         assert DatabaseTask.objects.filter(id=result.id).exists()
@@ -32,7 +32,7 @@ class TestDatabaseTaskBackend:
         assert db_task.status == TaskResultStatus.READY
 
     def test_enqueue_returns_task_result(self):
-        """enqueueがTaskResultを返す"""
+        """enqueue returns a TaskResult."""
         result = simple_task.enqueue(3, 4)
 
         assert result.id is not None
@@ -42,7 +42,7 @@ class TestDatabaseTaskBackend:
         assert result.enqueued_at is not None
 
     def test_enqueue_with_kwargs(self):
-        """キーワード引数付きのenqueue"""
+        """enqueue with keyword arguments."""
         result = simple_task.enqueue(x=5, y=6)
 
         db_task = DatabaseTask.objects.get(id=result.id)
@@ -50,21 +50,21 @@ class TestDatabaseTaskBackend:
         assert db_task.kwargs_json == {"x": 5, "y": 6}
 
     def test_enqueue_with_priority(self):
-        """優先度付きのenqueue"""
+        """enqueue with priority."""
         result = high_priority_task.enqueue()
 
         db_task = DatabaseTask.objects.get(id=result.id)
         assert db_task.priority == 10
 
     def test_enqueue_with_queue_name(self):
-        """キュー名付きのenqueue"""
+        """enqueue with queue name."""
         result = special_queue_task.enqueue()
 
         db_task = DatabaseTask.objects.get(id=result.id)
         assert db_task.queue_name == "special"
 
     def test_enqueue_with_run_after(self):
-        """遅延実行のenqueue"""
+        """enqueue with delayed execution."""
         run_after = timezone.now() + timedelta(hours=1)
         task = simple_task.using(run_after=run_after)
         result = task.enqueue(1, 2)
@@ -74,7 +74,7 @@ class TestDatabaseTaskBackend:
         assert db_task.run_after >= run_after - timedelta(seconds=1)
 
     def test_get_result_returns_task(self):
-        """get_resultがタスク結果を返す"""
+        """get_result returns the task result."""
         result = simple_task.enqueue(7, 8)
 
         backend = task_backends["default"]
@@ -85,7 +85,7 @@ class TestDatabaseTaskBackend:
         assert fetched.args == [7, 8]
 
     def test_get_result_not_found(self):
-        """存在しないIDでTaskResultDoesNotExist"""
+        """Raises TaskResultDoesNotExist for non-existent ID."""
         backend = task_backends["default"]
 
         with pytest.raises(TaskResultDoesNotExist):
@@ -95,7 +95,7 @@ class TestDatabaseTaskBackend:
 @pytest.mark.django_db
 class TestTaskExecution:
     def test_run_task_success(self):
-        """タスクの正常実行"""
+        """Task executes successfully."""
         result = simple_task.enqueue(10, 20)
         db_task = DatabaseTask.objects.get(id=result.id)
 
@@ -111,7 +111,7 @@ class TestTaskExecution:
         assert db_task.finished_at is not None
 
     def test_run_task_failure(self):
-        """タスクの失敗"""
+        """Task fails with error."""
         result = failing_task.enqueue()
         db_task = DatabaseTask.objects.get(id=result.id)
 
@@ -127,7 +127,7 @@ class TestTaskExecution:
         assert len(db_task.errors_json) == 1
 
     def test_run_task_with_context(self):
-        """コンテキスト付きタスクの実行"""
+        """Task with context executes correctly."""
         result = context_task.enqueue()
         db_task = DatabaseTask.objects.get(id=result.id)
 
@@ -138,7 +138,7 @@ class TestTaskExecution:
         assert result.id in final_result.return_value
 
     def test_run_task_updates_worker_id(self):
-        """worker_idが更新される"""
+        """worker_id is updated."""
         result = simple_task.enqueue(1, 1)
         db_task = DatabaseTask.objects.get(id=result.id)
 
@@ -149,7 +149,7 @@ class TestTaskExecution:
         assert "my-worker-123" in db_task.worker_ids_json
 
     def test_run_task_updates_timestamps(self):
-        """タイムスタンプが更新される"""
+        """Timestamps are updated."""
         result = simple_task.enqueue(1, 1)
         db_task = DatabaseTask.objects.get(id=result.id)
 
@@ -161,3 +161,52 @@ class TestTaskExecution:
         assert db_task.finished_at is not None
         assert db_task.last_attempted_at is not None
         assert db_task.started_at <= db_task.finished_at
+
+
+@pytest.mark.django_db
+class TestJsonSerialization:
+    """Tests for JSON serialization validation."""
+
+    def test_enqueue_with_valid_json_types(self):
+        """Valid JSON types are accepted."""
+        result = simple_task.enqueue(
+            1,  # int
+            2.5,  # float
+        )
+        db_task = DatabaseTask.objects.get(id=result.id)
+        assert db_task.args_json == [1, 2.5]
+
+    def test_enqueue_with_nested_structures(self):
+        """Nested dicts and lists are accepted."""
+        from tests.tasks import dict_task
+
+        result = dict_task.enqueue(
+            data={"key": "value", "nested": {"list": [1, 2, 3]}}
+        )
+        db_task = DatabaseTask.objects.get(id=result.id)
+        assert db_task.kwargs_json == {
+            "data": {"key": "value", "nested": {"list": [1, 2, 3]}}
+        }
+
+    def test_enqueue_with_datetime_raises_error(self):
+        """datetime objects raise TypeError."""
+        from datetime import datetime
+
+        with pytest.raises(TypeError, match="Unsupported type"):
+            simple_task.enqueue(datetime.now(), 1)
+
+    def test_enqueue_with_uuid_raises_error(self):
+        """UUID objects raise TypeError."""
+        import uuid
+
+        with pytest.raises(TypeError, match="Unsupported type"):
+            simple_task.enqueue(uuid.uuid4(), 1)
+
+    def test_enqueue_with_custom_object_raises_error(self):
+        """Custom objects raise TypeError."""
+
+        class CustomObject:
+            pass
+
+        with pytest.raises(TypeError, match="Unsupported type"):
+            simple_task.enqueue(CustomObject(), 1)

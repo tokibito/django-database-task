@@ -1,4 +1,4 @@
-"""モデルのテスト"""
+"""Tests for the DatabaseTask model."""
 
 import uuid
 
@@ -12,7 +12,7 @@ from django_database_task.models import DatabaseTask
 @pytest.mark.django_db
 class TestDatabaseTaskModel:
     def test_create_task(self):
-        """タスクの作成"""
+        """Task is created correctly."""
         task = DatabaseTask.objects.create(
             task_path="tests.tasks.simple_task",
             queue_name="default",
@@ -31,7 +31,7 @@ class TestDatabaseTaskModel:
         assert task.kwargs_json == {"key": "value"}
 
     def test_default_values(self):
-        """デフォルト値のテスト"""
+        """Default values are set correctly."""
         task = DatabaseTask.objects.create(
             task_path="tests.tasks.simple_task",
             enqueued_at=timezone.now(),
@@ -47,7 +47,7 @@ class TestDatabaseTaskModel:
         assert task.worker_ids_json == []
 
     def test_str_representation(self):
-        """文字列表現"""
+        """String representation is correct."""
         task = DatabaseTask.objects.create(
             task_path="tests.tasks.simple_task",
             enqueued_at=timezone.now(),
@@ -59,7 +59,7 @@ class TestDatabaseTaskModel:
         assert "READY" in str_repr
 
     def test_ordering(self):
-        """ソート順（優先度降順、enqueued_at昇順）"""
+        """Ordering is by priority (desc), enqueued_at (asc)."""
         now = timezone.now()
 
         task1 = DatabaseTask.objects.create(
@@ -82,14 +82,14 @@ class TestDatabaseTaskModel:
         )
 
         tasks = list(DatabaseTask.objects.all())
-        # priority降順なのでtask2が最初
+        # Higher priority comes first
         assert tasks[0] == task2
-        # 同じpriorityではenqueued_at昇順なのでtask3がtask1より前
+        # Same priority: earlier enqueued_at comes first
         assert tasks[1] == task3
         assert tasks[2] == task1
 
     def test_timestamps(self):
-        """created_at, updated_atの自動設定"""
+        """created_at and updated_at are set automatically."""
         task = DatabaseTask.objects.create(
             task_path="tests.tasks.simple_task",
             enqueued_at=timezone.now(),

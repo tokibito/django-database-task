@@ -1,48 +1,54 @@
-"""テスト用タスク定義"""
+"""Task definitions for testing."""
 
 from django.tasks import task
 
 
 @task()
 def simple_task(x, y):
-    """単純な加算タスク"""
+    """Simple addition task."""
     return x + y
 
 
 @task()
 def failing_task():
-    """常に失敗するタスク"""
+    """Task that always fails."""
     raise ValueError("This task always fails")
 
 
 @task(priority=10)
 def high_priority_task():
-    """高優先度タスク"""
+    """High priority task."""
     return "high priority"
 
 
 @task(priority=-10)
 def low_priority_task():
-    """低優先度タスク"""
+    """Low priority task."""
     return "low priority"
 
 
 @task(queue_name="special")
 def special_queue_task():
-    """特別なキューのタスク"""
+    """Task for special queue."""
     return "special queue"
 
 
 @task(takes_context=True)
 def context_task(context):
-    """コンテキストを受け取るタスク"""
+    """Task that receives context."""
     return f"task_id: {context.task_result.id}"
 
 
 @task()
 def slow_task(seconds=1):
-    """時間のかかるタスク"""
+    """Task that takes time to complete."""
     import time
 
     time.sleep(seconds)
     return f"slept for {seconds} seconds"
+
+
+@task()
+def dict_task(data):
+    """Task that receives a dictionary."""
+    return data
