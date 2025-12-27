@@ -49,8 +49,20 @@ sequenceDiagram
 
 - Python 3.12+
 - Django 6.0+
-- PostgreSQL 9.5+ or MySQL 8.0+ (for `SELECT FOR UPDATE SKIP LOCKED` support)
-  - SQLite works for development but doesn't support row-level locking
+
+### Supported Databases
+
+Django 6.0 officially supports the following database versions:
+
+| Database | Minimum Version | Notes |
+|----------|-----------------|-------|
+| PostgreSQL | 14+ | Recommended for production. Full `SELECT FOR UPDATE SKIP LOCKED` support. |
+| MySQL | 8.0.11+ | Full `SELECT FOR UPDATE SKIP LOCKED` support. |
+| MariaDB | 10.6+ | Full `SELECT FOR UPDATE SKIP LOCKED` support. |
+| SQLite | 3.31.0+ | Works for development/testing, but no row-level locking. |
+| Oracle | 19c+ | Supported but not tested with this package. |
+
+**Note**: `SELECT FOR UPDATE SKIP LOCKED` is used to prevent duplicate task execution in multi-worker environments. SQLite does not support row-level locking, so it is only recommended for development or single-worker deployments.
 
 ## Installation
 
