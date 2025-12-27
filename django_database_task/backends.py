@@ -1,5 +1,7 @@
+import asyncio
 import traceback
 from importlib import import_module
+from inspect import iscoroutinefunction
 
 from django.tasks.backends.base import BaseTaskBackend
 from django.tasks.base import Task, TaskContext, TaskError, TaskResult, TaskResultStatus
@@ -158,7 +160,10 @@ class DatabaseTaskBackend(BaseTaskBackend):
                 kwargs["context"] = context
 
             # Execute task
-            return_value = func(*args, **kwargs)
+            if iscoroutinefunction(func):
+                return_value = asyncio.run(func(*args, **kwargs))
+            else:
+                return_value = func(*args, **kwargs)
 
             # Normalize return value for JSON serialization
             # This will raise TypeError for unsupported types

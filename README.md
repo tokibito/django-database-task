@@ -196,6 +196,19 @@ def task_with_context(context, message):
     return f"Task {task_id} (attempt {attempt}): {message}"
 ```
 
+### Async tasks
+
+```python
+@task
+async def fetch_data(url):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            return await response.text()
+
+# Enqueue like normal tasks
+result = fetch_data.enqueue("https://example.com/api")
+```
+
 ### Queue-specific tasks
 
 ```python

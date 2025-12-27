@@ -11,6 +11,8 @@ from django.utils import timezone
 from django_database_task.models import DatabaseTask
 
 from .tasks import (
+    async_failing_task,
+    async_task,
     context_task,
     failing_task,
     high_priority_task,
@@ -208,3 +210,38 @@ class TestJsonSerialization:
 
         with pytest.raises(TypeError, match="Unsupported type"):
             simple_task.enqueue(CustomObject(), 1)
+
+
+@pytest.mark.django_db
+class TestAsyncTaskExecution:
+    """Tests for async task execution."""
+
+    def test_async_task_success(self):
+        """Async task executes successfully."""
+        result = async_task.enqueue(10, 20)
+        db_task = DatabaseTask.objects.get(id=result.id)
+
+        backend = task_backends["default"]
+        final_result = backend.run_task(db_task, worker_id="test-worker")
+
+        assert final_result.status == TaskResultStatus.SUCCESSFUL
+        assert final_result.return_value == 30
+
+        db_task.refresh_from_db()
+        assert db_task.status == TaskResultStatus.SUCCESSFUL
+        assert db_task.return_value_json == 30
+
+    def test_async_task_failure(self):
+        """Async task fails with error."""
+        result = async_failing_task.enqueue()
+        db_task = DatabaseTask.objects.get(id=result.id)
+
+        backend = task_backends["default"]
+        final_result = backend.run_task(db_task, worker_id="test-worker")
+
+        assert final_result.status == TaskResultStatus.FAILED
+        assert len(final_result.errors) == 1
+        assert "ValueError" in final_result.errors[0].exception_class_path
+
+        db_task.refresh_from_db()
+        assert db_task.status == TaskResultStatus.FAILED

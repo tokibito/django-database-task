@@ -52,3 +52,21 @@ def slow_task(seconds=1):
 def dict_task(data):
     """Task that receives a dictionary."""
     return data
+
+
+@task
+async def async_task(x, y):
+    """Async task for testing."""
+    import asyncio
+
+    await asyncio.sleep(0.01)
+    return x + y
+
+
+@task
+async def async_failing_task():
+    """Async task that always fails."""
+    import asyncio
+
+    await asyncio.sleep(0.01)
+    raise ValueError("Async task failed")
