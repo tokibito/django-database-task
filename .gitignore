@@ -47,8 +47,9 @@ coverage.xml
 .pytest_cache/
 
 # Translations
-*.mo
 *.pot
+# Keep .mo files in django_database_task/locale but ignore others
+!django_database_task/locale/**/*.mo
 
 # Django stuff:
 *.log

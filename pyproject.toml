@@ -7,7 +7,7 @@ name = "django-database-task"
 version = "0.1.0"
 description = "A database-backed task queue backend for Django 6.0's built-in task framework"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "Shinya Okano", email = "tokibito@gmail.com"}
 ]
@@ -28,7 +28,6 @@ classifiers = [
     "Framework :: Django",
     "Framework :: Django :: 6.0",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
@@ -57,6 +56,9 @@ Issues = "https://github.com/tokibito/django-database-task/issues"
 [tool.setuptools.packages.find]
 include = ["django_database_task*"]
 exclude = ["tests*", "examples*"]
+
+[tool.setuptools.package-data]
+django_database_task = ["locale/*/LC_MESSAGES/*.mo", "locale/*/LC_MESSAGES/*.po"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "tests.settings"
