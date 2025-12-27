@@ -3,13 +3,10 @@ import time
 import uuid
 
 from django.core.management.base import BaseCommand
-from django.db import transaction
-from django.db.models import Q
 from django.tasks import task_backends
 from django.tasks.base import TaskResultStatus
-from django.utils import timezone
 
-from django_database_task.models import DatabaseTask
+from django_database_task.executor import fetch_task
 
 
 class Command(BaseCommand):
@@ -67,7 +64,7 @@ class Command(BaseCommand):
         tasks_processed = 0
 
         while True:
-            task = self._fetch_and_lock_task(queue_name, backend_name)
+            task = fetch_task(queue_name=queue_name, backend_name=backend_name)
 
             if task is None:
                 if continuous:
@@ -99,26 +96,3 @@ class Command(BaseCommand):
                 break
 
         self.stdout.write(f"\nTotal tasks processed: {tasks_processed}")
-
-    def _fetch_and_lock_task(self, queue_name, backend_name):
-        """Fetch and lock a single pending task with exclusive lock."""
-        now = timezone.now()
-
-        with transaction.atomic():
-            queryset = DatabaseTask.objects.select_for_update(skip_locked=True).filter(
-                status=TaskResultStatus.READY,
-                backend_name=backend_name,
-            )
-
-            # run_after condition: NULL or before current time
-            queryset = queryset.filter(
-                Q(run_after__isnull=True) | Q(run_after__lte=now)
-            )
-
-            if queue_name:
-                queryset = queryset.filter(queue_name=queue_name)
-
-            # Order by priority descending, enqueued_at ascending
-            task = queryset.order_by("-priority", "enqueued_at").first()
-
-            return task
