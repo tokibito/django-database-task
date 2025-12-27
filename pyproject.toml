@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "django-database-task"
+version = "0.1.0"
+description = "A database-backed task queue backend for Django 6.0's built-in task framework"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Shinya Okano", email = "tokibito@gmail.com"}
+]
+maintainers = [
+    {name = "Shinya Okano", email = "tokibito@gmail.com"}
+]
+keywords = [
+    "django",
+    "task",
+    "queue",
+    "background",
+    "database",
+    "async",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Web Environment",
+    "Framework :: Django",
+    "Framework :: Django :: 6.0",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.12"
+dependencies = [
+    "Django>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-django>=4.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/tokibito/django-database-task"
+Repository = "https://github.com/tokibito/django-database-task"
+Issues = "https://github.com/tokibito/django-database-task/issues"
+
+[tool.setuptools.packages.find]
+include = ["django_database_task*"]
+exclude = ["tests*", "examples*"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.settings"
+pythonpath = ["."]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v"

@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Django Database Task Demo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 { color: #333; }
+        h2 { color: #555; margin-top: 30px; }
+        .task-forms {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .task-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .task-card h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .task-card p {
+            color: #666;
+            font-size: 14px;
+        }
+        input, button {
+            padding: 8px 12px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        input { width: calc(100% - 26px); }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            width: 100%;
+        }
+        button:hover { background: #0056b3; }
+        .task-list {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+        th { background: #f8f9fa; font-weight: 600; }
+        .status-READY { color: #6c757d; }
+        .status-RUNNING { color: #007bff; }
+        .status-SUCCESSFUL { color: #28a745; }
+        .status-FAILED { color: #dc3545; }
+        .priority-high { color: #dc3545; font-weight: bold; }
+        .priority-low { color: #6c757d; }
+        a { color: #007bff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .refresh-btn {
+            background: #6c757d;
+            margin-bottom: 10px;
+            width: auto;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <h1>Django Database Task Demo</h1>
+
+    <h2>Enqueue Tasks</h2>
+    <div class="task-forms">
+        <div class="task-card">
+            <h3>Add Numbers</h3>
+            <p>Add two numbers together</p>
+            <form method="post" action="{% url 'enqueue_add' %}">
+                {% csrf_token %}
+                <input type="number" name="x" placeholder="X" value="10">
+                <input type="number" name="y" placeholder="Y" value="20">
+                <button type="submit">Enqueue</button>
+            </form>
+        </div>
+
+        <div class="task-card">
+            <h3>Send Email</h3>
+            <p>Simulate sending an email</p>
+            <form method="post" action="{% url 'enqueue_email' %}">
+                {% csrf_token %}
+                <input type="email" name="to" placeholder="To" value="test@example.com">
+                <input type="text" name="subject" placeholder="Subject" value="Test Subject">
+                <input type="text" name="body" placeholder="Body" value="Hello!">
+                <button type="submit">Enqueue</button>
+            </form>
+        </div>
+
+        <div class="task-card">
+            <h3>Process Data</h3>
+            <p>Simulate data processing</p>
+            <form method="post" action="{% url 'enqueue_process' %}">
+                {% csrf_token %}
+                <input type="number" name="data_size" placeholder="Data Size" value="100">
+                <button type="submit">Enqueue</button>
+            </form>
+        </div>
+
+        <div class="task-card">
+            <h3>Failing Task</h3>
+            <p>Intentionally raise an error</p>
+            <form method="post" action="{% url 'enqueue_failing' %}">
+                {% csrf_token %}
+                <button type="submit">Enqueue</button>
+            </form>
+        </div>
+
+        <div class="task-card">
+            <h3>Priority Test</h3>
+            <p>Enqueue 3 low priority + 1 high priority tasks</p>
+            <form method="post" action="{% url 'enqueue_priority' %}">
+                {% csrf_token %}
+                <button type="submit">Enqueue</button>
+            </form>
+        </div>
+
+        <div class="task-card">
+            <h3>Delayed Task</h3>
+            <p>Task that runs after specified seconds</p>
+            <form method="post" action="{% url 'enqueue_delayed' %}">
+                {% csrf_token %}
+                <input type="number" name="delay" placeholder="Delay (seconds)" value="30">
+                <button type="submit">Enqueue</button>
+            </form>
+        </div>
+
+        <div class="task-card">
+            <h3>Context Task</h3>
+            <p>Task that uses task context</p>
+            <form method="post" action="{% url 'enqueue_context' %}">
+                {% csrf_token %}
+                <input type="text" name="message" placeholder="Message" value="Hello World!">
+                <button type="submit">Enqueue</button>
+            </form>
+        </div>
+    </div>
+
+    <h2>Recent Tasks</h2>
+    <button class="refresh-btn" onclick="location.reload()">Refresh</button>
+    <div class="task-list">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Task</th>
+                    <th>Priority</th>
+                    <th>Status</th>
+                    <th>Enqueued At</th>
+                    <th>Result</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for task in tasks %}
+                <tr>
+                    <td><a href="{% url 'result' task.id %}">{{ task.id|truncatechars:8 }}</a></td>
+                    <td>{{ task.task_path|truncatechars:30 }}</td>
+                    <td class="{% if task.priority > 0 %}priority-high{% elif task.priority < 0 %}priority-low{% endif %}">
+                        {{ task.priority }}
+                    </td>
+                    <td class="status-{{ task.status }}">{{ task.status }}</td>
+                    <td>{{ task.enqueued_at|date:"Y-m-d H:i:s" }}</td>
+                    <td>
+                        {% if task.status == 'SUCCESSFUL' %}
+                            {{ task.return_value_json|truncatechars:30 }}
+                        {% elif task.status == 'FAILED' %}
+                            Error
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" style="text-align: center; color: #999;">No tasks</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <h2>Worker Commands</h2>
+    <div class="task-card">
+        <p>Run the following commands in another terminal:</p>
+        <pre style="background: #333; color: #fff; padding: 10px; border-radius: 4px; overflow-x: auto;">
+# Run once
+python manage.py run_database_tasks
+
+# Continuous mode (poll every 5 seconds)
+python manage.py run_database_tasks --continuous --interval 5
+
+# Run specific queue only
+python manage.py run_database_tasks --queue emails --continuous</pre>
+    </div>
+</body>
+</html>

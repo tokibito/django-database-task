@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Result - Django Database Task Demo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 { color: #333; }
+        .result-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .field {
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #eee;
+        }
+        .field:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .field-label {
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 5px;
+        }
+        .field-value {
+            color: #333;
+            word-break: break-all;
+        }
+        .status-READY { color: #6c757d; }
+        .status-RUNNING { color: #007bff; }
+        .status-SUCCESSFUL { color: #28a745; }
+        .status-FAILED { color: #dc3545; }
+        pre {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 13px;
+        }
+        .error-box {
+            background: #fff5f5;
+            border: 1px solid #dc3545;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 10px;
+        }
+        .error-box pre {
+            background: #fff;
+            color: #dc3545;
+        }
+        a {
+            color: #007bff;
+            text-decoration: none;
+        }
+        a:hover { text-decoration: underline; }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+        .btn:hover {
+            background: #0056b3;
+            text-decoration: none;
+        }
+        .btn-secondary {
+            background: #6c757d;
+        }
+        .btn-secondary:hover {
+            background: #545b62;
+        }
+    </style>
+    {% if task and task.status == 'READY' or task.status == 'RUNNING' %}
+    <meta http-equiv="refresh" content="2">
+    {% endif %}
+</head>
+<body>
+    <h1>Task Result</h1>
+
+    {% if task %}
+    <div class="result-card">
+        <div class="field">
+            <div class="field-label">Task ID</div>
+            <div class="field-value">{{ task.id }}</div>
+        </div>
+
+        <div class="field">
+            <div class="field-label">Task Path</div>
+            <div class="field-value">{{ task.task_path }}</div>
+        </div>
+
+        <div class="field">
+            <div class="field-label">Status</div>
+            <div class="field-value status-{{ task.status }}">
+                {{ task.status }}
+                {% if task.status == 'READY' or task.status == 'RUNNING' %}
+                    <span style="color: #999;">(auto-refreshing...)</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="field">
+            <div class="field-label">Priority</div>
+            <div class="field-value">{{ task.priority }}</div>
+        </div>
+
+        <div class="field">
+            <div class="field-label">Queue Name</div>
+            <div class="field-value">{{ task.queue_name }}</div>
+        </div>
+
+        <div class="field">
+            <div class="field-label">Arguments</div>
+            <div class="field-value">
+                <pre>args: {{ task.args_json }}
+kwargs: {{ task.kwargs_json }}</pre>
+            </div>
+        </div>
+
+        <div class="field">
+            <div class="field-label">Timestamps</div>
+            <div class="field-value">
+                <table style="width: 100%;">
+                    <tr><td>Enqueued:</td><td>{{ task.enqueued_at|date:"Y-m-d H:i:s" }}</td></tr>
+                    <tr><td>Started:</td><td>{{ task.started_at|date:"Y-m-d H:i:s"|default:"-" }}</td></tr>
+                    <tr><td>Finished:</td><td>{{ task.finished_at|date:"Y-m-d H:i:s"|default:"-" }}</td></tr>
+                    {% if task.run_after %}
+                    <tr><td>Scheduled:</td><td>{{ task.run_after|date:"Y-m-d H:i:s" }}</td></tr>
+                    {% endif %}
+                </table>
+            </div>
+        </div>
+
+        {% if task.status == 'SUCCESSFUL' %}
+        <div class="field">
+            <div class="field-label">Return Value</div>
+            <div class="field-value">
+                <pre>{{ task.return_value_json }}</pre>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if task.status == 'FAILED' and task.errors_json %}
+        <div class="field">
+            <div class="field-label">Error Information</div>
+            <div class="error-box">
+                {% for error in task.errors_json %}
+                <div style="margin-bottom: 10px;">
+                    <strong>{{ error.exception_class_path }}</strong>
+                    <pre>{{ error.traceback }}</pre>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if task.worker_ids_json %}
+        <div class="field">
+            <div class="field-label">Worker ID</div>
+            <div class="field-value">{{ task.worker_ids_json|join:", " }}</div>
+        </div>
+        {% endif %}
+    </div>
+    {% else %}
+    <div class="result-card">
+        <p style="color: #dc3545;">Task not found</p>
+    </div>
+    {% endif %}
+
+    <a href="{% url 'index' %}" class="btn">Back to Home</a>
+    <a href="" class="btn btn-secondary">Refresh</a>
+</body>
+</html>
