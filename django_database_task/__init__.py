@@ -12,6 +12,7 @@ def __getattr__(name):
         "get_pending_task_count",
         "process_one_task",
         "process_tasks",
+        "run_task_by_id",
     ):
         from . import executor
 
@@ -24,4 +25,5 @@ __all__ = [
     "get_pending_task_count",
     "process_one_task",
     "process_tasks",
+    "run_task_by_id",
 ]

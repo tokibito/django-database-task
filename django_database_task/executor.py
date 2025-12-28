@@ -179,3 +179,72 @@ def get_pending_task_count(queue_name=None, backend_name="default"):
         queryset = queryset.filter(queue_name=queue_name)
 
     return queryset.count()
+
+
+def run_task_by_id(task_id, worker_id=None, allow_retry=False):
+    """
+    Execute a specific task by its ID.
+
+    This function is designed for external trigger systems (e.g., Cloud Tasks,
+    webhooks) that need to execute a specific task by ID rather than fetching
+    the next available task.
+
+    By default, only tasks in READY status can be executed. Use allow_retry=True
+    to also execute FAILED tasks (useful for Cloud Tasks retry mechanism).
+
+    Args:
+        task_id: UUID or string ID of the task to execute.
+        worker_id: Optional worker ID. If not provided, one will be generated.
+        allow_retry: If True, also allow execution of FAILED tasks.
+                     The task will be reset to READY before execution.
+
+    Returns:
+        TaskResult if the task was executed, None if the task was not found
+        or not in an executable status.
+
+    Raises:
+        DatabaseTask.DoesNotExist: If no task with the given ID exists.
+
+    Example:
+        >>> from django_database_task import run_task_by_id
+        >>> result = run_task_by_id("550e8400-e29b-41d4-a716-446655440000")
+        >>> if result:
+        ...     print(f"Executed: {result.id}, status: {result.status}")
+        ... else:
+        ...     print("Task not in executable status")
+
+        # Retry a failed task
+        >>> result = run_task_by_id("...", allow_retry=True)
+    """
+    if worker_id is None:
+        worker_id = _generate_worker_id()
+
+    allowed_statuses = [TaskResultStatus.READY]
+    if allow_retry:
+        allowed_statuses.append(TaskResultStatus.FAILED)
+
+    with transaction.atomic():
+        # Use select_for_update to ensure exclusive access
+        try:
+            task = DatabaseTask.objects.select_for_update(skip_locked=True).get(
+                id=task_id,
+                status__in=allowed_statuses,
+            )
+        except DatabaseTask.DoesNotExist:
+            # Task doesn't exist or is not in allowed status
+            # Check if task exists at all for better error handling
+            if not DatabaseTask.objects.filter(id=task_id).exists():
+                raise DatabaseTask.DoesNotExist(
+                    f"DatabaseTask with id={task_id} does not exist"
+                )
+            # Task exists but is not in allowed status
+            return None
+
+        # Reset FAILED task to READY for retry
+        if task.status == TaskResultStatus.FAILED:
+            task.status = TaskResultStatus.READY
+            task.finished_at = None
+            task.save(update_fields=["status", "finished_at", "updated_at"])
+
+    backend = task_backends[task.backend_name]
+    return backend.run_task(task, worker_id=worker_id)

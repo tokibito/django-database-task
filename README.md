@@ -258,7 +258,12 @@ python manage.py purge_completed_database_tasks [options]
 You can also process tasks programmatically without management commands:
 
 ```python
-from django_database_task import process_one_task, process_tasks, get_pending_task_count
+from django_database_task import (
+    process_one_task,
+    process_tasks,
+    get_pending_task_count,
+    run_task_by_id,
+)
 
 # Process a single task
 result = process_one_task()
@@ -275,6 +280,14 @@ results = process_tasks(queue_name="emails", max_tasks=5)
 # Get pending task count
 count = get_pending_task_count()
 print(f"Pending tasks: {count}")
+
+# Execute a specific task by ID
+result = run_task_by_id("550e8400-e29b-41d4-a716-446655440000")
+if result:
+    print(f"Executed: {result.id}, status: {result.status}")
+
+# Retry a failed task
+result = run_task_by_id("...", allow_retry=True)
 ```
 
 ## HTTP Endpoints (Optional)
@@ -302,6 +315,7 @@ urlpatterns = [
 | `/tasks/run/` | POST | Process multiple pending tasks |
 | `/tasks/run-one/` | POST | Process a single pending task |
 | `/tasks/status/` | GET | Get pending task count |
+| `/tasks/execute/<uuid>/` | POST | Execute a specific task by ID |
 
 ### Request Parameters
 
@@ -350,6 +364,31 @@ or
 Response:
 ```json
 {"pending_count": 5}
+```
+
+#### POST `/tasks/execute/<uuid>/`
+
+Execute a specific task by ID. This endpoint is designed for external trigger systems
+(e.g., Cloud Tasks, webhooks) that need to execute a specific task.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `fail_on_error` | query string | "false" | Return HTTP 500 on task failure |
+| `allow_retry` | query string | "false" | Allow re-execution of FAILED tasks |
+
+Response (success):
+```json
+{"executed": true, "result": {"id": "uuid", "status": "SUCCESSFUL", "task_path": "..."}}
+```
+
+Response (task not in executable status):
+```json
+{"executed": false, "reason": "Task is not in READY status"}
+```
+
+Response (task not found):
+```json
+{"error": "Task not found"}  // HTTP 404
 ```
 
 ### Example Usage
@@ -461,12 +500,26 @@ urlpatterns = [
 
 ## Django Admin
 
-The package includes a Django Admin integration to view task status:
+The package includes a Django Admin integration to view and manage tasks:
 
 - Task list with status badges
 - Filter by status, queue, backend
 - Search by task ID or path
 - View task arguments and results
+
+### Admin Actions
+
+The admin interface provides the following bulk actions:
+
+| Action | Description |
+|--------|-------------|
+| **Run selected tasks** | Execute selected tasks that are in READY status |
+| **Retry failed tasks** | Reset FAILED tasks to READY status and re-execute them |
+
+These actions are useful for:
+- Manually triggering task execution from the admin
+- Retrying failed tasks after fixing issues
+- Testing task execution during development
 
 ## License
 

@@ -18,11 +18,18 @@ Usage:
 import json
 
 from django.http import JsonResponse
+from django.tasks.base import TaskResultStatus
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
-from .executor import get_pending_task_count, process_one_task, process_tasks
+from .executor import (
+    get_pending_task_count,
+    process_one_task,
+    process_tasks,
+    run_task_by_id,
+)
+from .models import DatabaseTask
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -203,3 +210,142 @@ class TaskStatusView(View):
         )
 
         return JsonResponse({"pending_count": count})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ExecuteTaskView(View):
+    """
+    Execute a specific task by ID via HTTP POST.
+
+    This endpoint is designed for external trigger systems (e.g., Cloud Tasks,
+    webhooks) that need to execute a specific task by ID.
+
+    URL pattern:
+        POST /tasks/execute/<task_id>/
+
+    Query parameters:
+        fail_on_error: If "true", return HTTP 500 on task failure to trigger
+                       external retry mechanisms (e.g., Cloud Tasks).
+                       Default: "false" (always return HTTP 200).
+        allow_retry: If "true", allow execution of FAILED tasks by resetting
+                     them to READY status first. This enables Cloud Tasks
+                     retry mechanism. Default: "false".
+
+    Response (task executed successfully):
+        HTTP 200
+        {
+            "executed": true,
+            "result": {
+                "id": "...",
+                "status": "SUCCESSFUL",
+                "task_path": "..."
+            }
+        }
+
+    Response (task failed, fail_on_error=false):
+        HTTP 200
+        {
+            "executed": true,
+            "result": {
+                "id": "...",
+                "status": "FAILED",
+                "task_path": "..."
+            }
+        }
+
+    Response (task failed, fail_on_error=true):
+        HTTP 500
+        {
+            "executed": true,
+            "failed": true,
+            "result": {
+                "id": "...",
+                "status": "FAILED",
+                "task_path": "..."
+            }
+        }
+
+    Response (task not in READY status):
+        HTTP 200
+        {
+            "executed": false,
+            "reason": "Task is not in READY status"
+        }
+
+    Response (task not found):
+        HTTP 404
+        {
+            "error": "Task not found"
+        }
+
+    Cloud Tasks Integration:
+        To enable Cloud Tasks automatic retry on task failure:
+
+        1. Create Cloud Tasks with URL:
+           /tasks/execute/<task_id>/?fail_on_error=true&allow_retry=true
+        2. Configure retry policy in Cloud Tasks
+        3. On task failure, this endpoint returns HTTP 500
+        4. Cloud Tasks will retry based on its retry policy
+        5. On retry, allow_retry=true allows the FAILED task to be re-executed
+
+    Security:
+        - Only accepts POST requests
+        - CSRF exempt (intended for external trigger systems)
+        - Consider adding authentication in your URL configuration:
+
+            # For Cloud Tasks with OIDC
+            from django_database_task.views import ExecuteTaskView
+
+            def verify_cloud_tasks_token(view_func):
+                def wrapper(request, *args, **kwargs):
+                    # Verify OIDC token from Cloud Tasks
+                    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+                    # ... token verification logic ...
+                    return view_func(request, *args, **kwargs)
+                return wrapper
+
+            urlpatterns = [
+                path(
+                    "tasks/execute/<uuid:task_id>/",
+                    verify_cloud_tasks_token(ExecuteTaskView.as_view()),
+                ),
+            ]
+    """
+
+    http_method_names = ["post"]
+
+    def post(self, request, task_id):
+        fail_on_error = request.GET.get("fail_on_error", "").lower() == "true"
+        allow_retry = request.GET.get("allow_retry", "").lower() == "true"
+
+        try:
+            result = run_task_by_id(task_id, allow_retry=allow_retry)
+        except DatabaseTask.DoesNotExist:
+            return JsonResponse({"error": "Task not found"}, status=404)
+
+        if result is None:
+            return JsonResponse(
+                {"executed": False, "reason": "Task is not in READY status"}
+            )
+
+        task_path = (
+            result.task.func.__module__ + "." + result.task.func.__qualname__
+            if hasattr(result.task, "func")
+            else str(result.task)
+        )
+
+        response_data = {
+            "executed": True,
+            "result": {
+                "id": str(result.id),
+                "status": result.status.value,
+                "task_path": task_path,
+            },
+        }
+
+        # If task failed and fail_on_error is enabled, return 500 for external retry
+        if result.status == TaskResultStatus.FAILED and fail_on_error:
+            response_data["failed"] = True
+            return JsonResponse(response_data, status=500)
+
+        return JsonResponse(response_data)
