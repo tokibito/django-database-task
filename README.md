@@ -10,6 +10,7 @@ A database-backed task queue backend for Django 6.0's built-in task framework.
 - **Exclusive locking** - Prevents duplicate task execution with `SELECT FOR UPDATE SKIP LOCKED`
 - **Django Admin integration** - View and manage tasks from the admin interface
 - **Async support** - Supports async task functions
+- **Google Cloud Tasks integration** - Optional backend for GAE/Cloud Run with auto-detection
 
 ## Architecture
 
@@ -496,6 +497,134 @@ def require_api_token(view_func):
 urlpatterns = [
     path("tasks/run/", require_api_token(RunTasksView.as_view())),
 ]
+```
+
+## Google Cloud Tasks Integration
+
+For serverless environments like Google App Engine or Cloud Run, you can use the Cloud Tasks backend to automatically create Cloud Tasks when tasks are enqueued.
+
+### Installation
+
+```bash
+pip install django-database-task[cloudtasks]
+```
+
+### Quick Setup
+
+```python
+# settings.py
+TASKS = {
+    "default": {
+        "BACKEND": "django_database_task.cloudtasks.CloudTasksDatabaseBackend",
+        "OPTIONS": {
+            "CLOUD_TASKS_QUEUE": "default",  # Only required setting
+        },
+    },
+}
+```
+
+Project ID, location, and handler URL are auto-detected from GAE/Cloud Run environment variables.
+
+### How It Works
+
+```
+1. App enqueues task → Task saved to database + Cloud Task created
+2. Cloud Task triggers HTTP request → /tasks/execute/<task_id>/
+3. Handler retrieves task from database and executes it
+```
+
+The Cloud Task only contains the task ID. All task parameters are stored in the database, ensuring:
+- **Blue/Green deployment support**: Tasks execute on the same version that enqueued them
+- **Database as source of truth**: Task parameters are never lost
+- **Automatic retry**: Cloud Tasks handles retry with the task ID
+
+### Configuration Options
+
+```python
+TASKS = {
+    "default": {
+        "BACKEND": "django_database_task.cloudtasks.CloudTasksDatabaseBackend",
+        "OPTIONS": {
+            # Required
+            "CLOUD_TASKS_QUEUE": "default",
+
+            # Auto-detected (override if needed)
+            # "CLOUD_TASKS_PROJECT": "my-project",
+            # "CLOUD_TASKS_LOCATION": "asia-northeast1",
+            # "TASK_HANDLER_URL": "https://myapp.example.com/tasks/execute/{task_id}/",
+            # "TASK_HANDLER_PATH": "/tasks/execute/{task_id}/",
+
+            # OIDC authentication (optional)
+            # "OIDC_SERVICE_ACCOUNT_EMAIL": "...",
+            # "OIDC_AUDIENCE": "https://...",
+        },
+    },
+}
+```
+
+### Auto-Detection
+
+| Setting | Environment Variable | Description |
+|---------|---------------------|-------------|
+| Project | `GOOGLE_CLOUD_PROJECT` | GCP project ID |
+| Location | `CLOUD_RUN_REGION` / `GAE_REGION` | Cloud Tasks region |
+| Handler URL | Built from `K_SERVICE`, `GAE_SERVICE`, `GAE_VERSION` | Task execution endpoint |
+
+### OIDC Authentication
+
+When `OIDC_SERVICE_ACCOUNT_EMAIL` is configured, Cloud Tasks will send OIDC tokens with each request. The backend automatically verifies these tokens on the `/tasks/execute/` endpoint.
+
+```python
+# settings.py - Automatic OIDC verification
+TASKS = {
+    "default": {
+        "BACKEND": "django_database_task.cloudtasks.CloudTasksDatabaseBackend",
+        "OPTIONS": {
+            "CLOUD_TASKS_QUEUE": "default",
+            "OIDC_SERVICE_ACCOUNT_EMAIL": "my-sa@project.iam.gserviceaccount.com",
+            # OIDC_AUDIENCE is auto-detected from handler URL if not set
+        },
+    },
+}
+```
+
+Alternatively, you can use the decorator directly on your URL configuration:
+
+```python
+# urls.py
+from django.urls import path
+from django_database_task.views import ExecuteTaskView
+from django_database_task.cloudtasks import verify_cloud_tasks_oidc
+
+urlpatterns = [
+    path(
+        "tasks/execute/<uuid:task_id>/",
+        verify_cloud_tasks_oidc(
+            ExecuteTaskView.as_view(),
+            audience="https://myapp.example.com"
+        ),
+        name="execute_task",
+    ),
+]
+```
+
+### Detection Utilities
+
+You can use the detection functions directly:
+
+```python
+from django_database_task.cloudtasks import (
+    detect_gcp_project,
+    detect_gcp_location,
+    detect_task_handler_host,
+    is_cloud_run,
+    is_app_engine,
+)
+
+if is_cloud_run():
+    print(f"Running on Cloud Run in {detect_gcp_location()}")
+elif is_app_engine():
+    print(f"Running on App Engine in project {detect_gcp_project()}")
 ```
 
 ## Django Admin

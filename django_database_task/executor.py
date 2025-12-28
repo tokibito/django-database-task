@@ -230,13 +230,13 @@ def run_task_by_id(task_id, worker_id=None, allow_retry=False):
                 id=task_id,
                 status__in=allowed_statuses,
             )
-        except DatabaseTask.DoesNotExist:
+        except DatabaseTask.DoesNotExist as e:
             # Task doesn't exist or is not in allowed status
             # Check if task exists at all for better error handling
             if not DatabaseTask.objects.filter(id=task_id).exists():
                 raise DatabaseTask.DoesNotExist(
                     f"DatabaseTask with id={task_id} does not exist"
-                )
+                ) from e
             # Task exists but is not in allowed status
             return None
 

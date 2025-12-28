@@ -19,6 +19,20 @@ class DatabaseTaskBackend(BaseTaskBackend):
     supports_get_result = True
     supports_priority = True
 
+    def get_auth_handler(self):
+        """
+        Get the authentication handler for task execution endpoints.
+
+        Subclasses can override this to provide custom authentication.
+        The handler should be a callable that takes a request and returns:
+        - None if authentication succeeds
+        - A JsonResponse with error details if authentication fails
+
+        Returns:
+            Callable or None
+        """
+        return None
+
     def enqueue(self, task, args, kwargs):
         """Enqueue a task to the database.
 

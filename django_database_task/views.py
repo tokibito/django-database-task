@@ -18,6 +18,7 @@ Usage:
 import json
 
 from django.http import JsonResponse
+from django.tasks import default_task_backend
 from django.tasks.base import TaskResultStatus
 from django.utils.decorators import method_decorator
 from django.views import View
@@ -30,6 +31,15 @@ from .executor import (
     run_task_by_id,
 )
 from .models import DatabaseTask
+
+
+def get_backend(backend_name="default"):
+    """Get a task backend by name."""
+    if backend_name == "default":
+        return default_task_backend
+    from django.tasks import tasks
+
+    return tasks[backend_name]
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -230,6 +240,8 @@ class ExecuteTaskView(View):
         allow_retry: If "true", allow execution of FAILED tasks by resetting
                      them to READY status first. This enables Cloud Tasks
                      retry mechanism. Default: "false".
+        backend_name: Backend name for authentication handler lookup.
+                      Default: "default".
 
     Response (task executed successfully):
         HTTP 200
@@ -288,33 +300,31 @@ class ExecuteTaskView(View):
         4. Cloud Tasks will retry based on its retry policy
         5. On retry, allow_retry=true allows the FAILED task to be re-executed
 
-    Security:
-        - Only accepts POST requests
-        - CSRF exempt (intended for external trigger systems)
-        - Consider adding authentication in your URL configuration:
+    Authentication:
+        The backend can provide an authentication handler via get_auth_handler().
+        When using CloudTasksDatabaseBackend with OIDC configuration, the
+        OIDC token is automatically verified before task execution.
 
-            # For Cloud Tasks with OIDC
-            from django_database_task.views import ExecuteTaskView
-
-            def verify_cloud_tasks_token(view_func):
-                def wrapper(request, *args, **kwargs):
-                    # Verify OIDC token from Cloud Tasks
-                    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-                    # ... token verification logic ...
-                    return view_func(request, *args, **kwargs)
-                return wrapper
-
-            urlpatterns = [
-                path(
-                    "tasks/execute/<uuid:task_id>/",
-                    verify_cloud_tasks_token(ExecuteTaskView.as_view()),
-                ),
-            ]
+        For custom authentication, subclass the backend and override
+        get_auth_handler() to return a callable that takes a request and returns:
+        - None if authentication succeeds
+        - A JsonResponse with error details if authentication fails
     """
 
     http_method_names = ["post"]
 
     def post(self, request, task_id):
+        backend_name = request.GET.get("backend_name", "default")
+
+        # Get backend and check for auth handler
+        backend = get_backend(backend_name)
+        if hasattr(backend, "get_auth_handler"):
+            auth_handler = backend.get_auth_handler()
+            if auth_handler:
+                error_response = auth_handler(request)
+                if error_response:
+                    return error_response
+
         fail_on_error = request.GET.get("fail_on_error", "").lower() == "true"
         allow_retry = request.GET.get("allow_retry", "").lower() == "true"
 
