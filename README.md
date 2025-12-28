@@ -317,6 +317,7 @@ urlpatterns = [
 | `/tasks/run-one/` | POST | Process a single pending task |
 | `/tasks/status/` | GET | Get pending task count |
 | `/tasks/execute/<uuid>/` | POST | Execute a specific task by ID |
+| `/tasks/purge/` | POST | Delete completed tasks |
 
 ### Request Parameters
 
@@ -392,6 +393,27 @@ Response (task not found):
 {"error": "Task not found"}  // HTTP 404
 ```
 
+#### POST `/tasks/purge/`
+
+Delete completed tasks from the database. Useful for cron-based cleanup.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | int | 0 | Delete tasks completed more than N days ago (0=all) |
+| `status` | string | "SUCCESSFUL,FAILED" | Target statuses, comma-separated |
+| `batch_size` | int | 1000 | Number of tasks to delete at once (max: 10000) |
+| `dry_run` | bool | false | If true, return count without deleting |
+
+Response:
+```json
+{"deleted": 150, "dry_run": false}
+```
+
+Response (dry run):
+```json
+{"count": 150, "dry_run": true}
+```
+
 ### Example Usage
 
 ```bash
@@ -407,6 +429,16 @@ curl -X POST http://localhost:8000/tasks/run/ \
 
 # Get pending task count
 curl http://localhost:8000/tasks/status/
+
+# Delete tasks completed more than 7 days ago
+curl -X POST http://localhost:8000/tasks/purge/ \
+  -H "Content-Type: application/json" \
+  -d '{"days": 7}'
+
+# Dry run to check how many tasks would be deleted
+curl -X POST http://localhost:8000/tasks/purge/ \
+  -H "Content-Type: application/json" \
+  -d '{"days": 30, "dry_run": true}'
 ```
 
 ### Use Cases
@@ -453,13 +485,31 @@ if [ "$count" -gt 100 ]; then
 fi
 ```
 
+#### Scheduled Cleanup
+
+Use cron or Cloud Scheduler to delete old completed tasks:
+
+```bash
+# Daily cleanup via cron or Cloud Scheduler
+# Delete tasks completed more than 30 days ago
+curl -X POST https://your-app.com/tasks/purge/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"days": 30}'
+```
+
 ### Security
 
 The endpoints are CSRF-exempt for API/webhook use. **Always add authentication in production:**
 
 ```python
 from django.contrib.admin.views.decorators import staff_member_required
-from django_database_task.views import RunTasksView, RunOneTaskView, TaskStatusView
+from django_database_task.views import (
+    RunTasksView,
+    RunOneTaskView,
+    TaskStatusView,
+    PurgeCompletedTasksView,
+)
 
 urlpatterns = [
     path(
@@ -476,6 +526,11 @@ urlpatterns = [
         "tasks/status/",
         staff_member_required(TaskStatusView.as_view()),
         name="task_status",
+    ),
+    path(
+        "tasks/purge/",
+        staff_member_required(PurgeCompletedTasksView.as_view()),
+        name="purge_completed_tasks",
     ),
 ]
 ```
