@@ -582,10 +582,36 @@ Project ID, location, and handler URL are auto-detected from GAE/Cloud Run envir
 
 ### How It Works
 
-```
-1. App enqueues task → Task saved to database + Cloud Task created
-2. Cloud Task triggers HTTP request → /tasks/execute/<task_id>/
-3. Handler retrieves task from database and executes it
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant Backend as CloudTasksDatabaseBackend
+    participant DB as Database
+    participant CT as Cloud Tasks
+    participant Handler as /tasks/execute/
+
+    Note over App,Handler: Task Enqueue
+    App->>Backend: task.enqueue(args, kwargs)
+    Backend->>DB: INSERT task (status=READY)
+    DB-->>Backend: Task ID
+    Backend->>CT: Create Cloud Task (task_id only)
+    CT-->>Backend: OK
+    Backend-->>App: TaskResult (id, status=READY)
+
+    Note over App,Handler: Task Execution (triggered by Cloud Tasks)
+    CT->>Handler: POST /tasks/execute/<task_id>/<br/>(with OIDC token if configured)
+    Handler->>Handler: Verify OIDC token (optional)
+    Handler->>DB: SELECT task by ID
+    DB-->>Handler: Task record
+    Handler->>DB: UPDATE status=RUNNING
+    Handler->>Handler: Execute task function
+    alt Success
+        Handler->>DB: UPDATE status=SUCCESSFUL
+        Handler-->>CT: HTTP 200
+    else Failure
+        Handler->>DB: UPDATE status=FAILED
+        Handler-->>CT: HTTP 500 (triggers retry)
+    end
 ```
 
 The Cloud Task only contains the task ID. All task parameters are stored in the database, ensuring:
