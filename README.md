@@ -627,7 +627,7 @@ TASKS = {
 
 ### OIDC Authentication
 
-When `OIDC_SERVICE_ACCOUNT_EMAIL` is configured, Cloud Tasks will send OIDC tokens with each request. The backend automatically verifies these tokens on the `/tasks/execute/` endpoint.
+When `OIDC_SERVICE_ACCOUNT_EMAIL` is configured, Cloud Tasks will send OIDC tokens with each request. The backend automatically verifies these tokens on the `/tasks/execute/` and `/tasks/purge/` endpoints.
 
 ```python
 # settings.py - Automatic OIDC verification
