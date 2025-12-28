@@ -544,3 +544,256 @@ class TestExecuteTaskView:
         # Verify task is now successful
         task.refresh_from_db()
         assert task.status == TaskResultStatus.SUCCESSFUL
+
+
+@pytest.mark.django_db
+class TestPurgeCompletedTasksView:
+    """Tests for PurgeCompletedTasksView."""
+
+    def test_purge_deletes_completed_tasks(self, client):
+        """Test that POST deletes completed tasks."""
+        # Create completed tasks
+        for i in range(3):
+            DatabaseTask.objects.create(
+                task_path="tests.test_executor.sample_task",
+                queue_name="default",
+                priority=0,
+                args_json=[i, i],
+                kwargs_json={},
+                status=TaskResultStatus.SUCCESSFUL,
+                enqueued_at=timezone.now(),
+                finished_at=timezone.now(),
+                backend_name="default",
+            )
+
+        # Create a pending task that should NOT be deleted
+        DatabaseTask.objects.create(
+            task_path="tests.test_executor.sample_task",
+            queue_name="default",
+            priority=0,
+            args_json=[1, 2],
+            kwargs_json={},
+            status=TaskResultStatus.READY,
+            enqueued_at=timezone.now(),
+            backend_name="default",
+        )
+
+        response = client.post(
+            reverse("django_database_task:purge_completed_tasks"),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] == 3
+        assert data["dry_run"] is False
+
+        # Verify only pending task remains
+        assert DatabaseTask.objects.count() == 1
+        assert DatabaseTask.objects.first().status == TaskResultStatus.READY
+
+    def test_purge_deletes_failed_tasks(self, client):
+        """Test that failed tasks are deleted by default."""
+        DatabaseTask.objects.create(
+            task_path="tests.test_executor.sample_task",
+            queue_name="default",
+            priority=0,
+            args_json=[1, 2],
+            kwargs_json={},
+            status=TaskResultStatus.FAILED,
+            enqueued_at=timezone.now(),
+            finished_at=timezone.now(),
+            backend_name="default",
+        )
+
+        response = client.post(
+            reverse("django_database_task:purge_completed_tasks"),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] == 1
+
+    def test_purge_filters_by_status(self, client):
+        """Test that status filter works."""
+        DatabaseTask.objects.create(
+            task_path="tests.test_executor.sample_task",
+            queue_name="default",
+            priority=0,
+            args_json=[1, 2],
+            kwargs_json={},
+            status=TaskResultStatus.SUCCESSFUL,
+            enqueued_at=timezone.now(),
+            finished_at=timezone.now(),
+            backend_name="default",
+        )
+        DatabaseTask.objects.create(
+            task_path="tests.test_executor.sample_task",
+            queue_name="default",
+            priority=0,
+            args_json=[1, 2],
+            kwargs_json={},
+            status=TaskResultStatus.FAILED,
+            enqueued_at=timezone.now(),
+            finished_at=timezone.now(),
+            backend_name="default",
+        )
+
+        response = client.post(
+            reverse("django_database_task:purge_completed_tasks"),
+            data=json.dumps({"status": "SUCCESSFUL"}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] == 1
+
+        # Verify only failed task remains
+        assert DatabaseTask.objects.count() == 1
+        assert DatabaseTask.objects.first().status == TaskResultStatus.FAILED
+
+    def test_purge_filters_by_days(self, client):
+        """Test that days filter works."""
+        from datetime import timedelta
+
+        # Task completed 10 days ago (will be deleted)
+        DatabaseTask.objects.create(
+            task_path="tests.test_executor.sample_task",
+            queue_name="default",
+            priority=0,
+            args_json=[1, 2],
+            kwargs_json={},
+            status=TaskResultStatus.SUCCESSFUL,
+            enqueued_at=timezone.now() - timedelta(days=10),
+            finished_at=timezone.now() - timedelta(days=10),
+            backend_name="default",
+        )
+
+        # Task completed today
+        new_task = DatabaseTask.objects.create(
+            task_path="tests.test_executor.sample_task",
+            queue_name="default",
+            priority=0,
+            args_json=[1, 2],
+            kwargs_json={},
+            status=TaskResultStatus.SUCCESSFUL,
+            enqueued_at=timezone.now(),
+            finished_at=timezone.now(),
+            backend_name="default",
+        )
+
+        response = client.post(
+            reverse("django_database_task:purge_completed_tasks"),
+            data=json.dumps({"days": 7}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] == 1
+
+        # Verify only new task remains
+        assert DatabaseTask.objects.count() == 1
+        assert DatabaseTask.objects.first().id == new_task.id
+
+    def test_purge_dry_run(self, client):
+        """Test that dry_run returns count without deleting."""
+        for i in range(5):
+            DatabaseTask.objects.create(
+                task_path="tests.test_executor.sample_task",
+                queue_name="default",
+                priority=0,
+                args_json=[i, i],
+                kwargs_json={},
+                status=TaskResultStatus.SUCCESSFUL,
+                enqueued_at=timezone.now(),
+                finished_at=timezone.now(),
+                backend_name="default",
+            )
+
+        response = client.post(
+            reverse("django_database_task:purge_completed_tasks"),
+            data=json.dumps({"dry_run": True}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 5
+        assert data["dry_run"] is True
+
+        # Verify no tasks were deleted
+        assert DatabaseTask.objects.count() == 5
+
+    def test_purge_returns_zero_when_no_tasks(self, client):
+        """Test response when no tasks to delete."""
+        response = client.post(
+            reverse("django_database_task:purge_completed_tasks"),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] == 0
+
+    def test_purge_rejects_get(self, client):
+        """Test that GET method is not allowed."""
+        response = client.get(reverse("django_database_task:purge_completed_tasks"))
+        assert response.status_code == 405
+
+    def test_purge_rejects_invalid_json(self, client):
+        """Test that invalid JSON returns 400."""
+        response = client.post(
+            reverse("django_database_task:purge_completed_tasks"),
+            data="not valid json",
+            content_type="application/json",
+        )
+
+        assert response.status_code == 400
+        assert "Invalid JSON" in response.json()["error"]
+
+    def test_purge_rejects_invalid_days(self, client):
+        """Test that invalid days returns 400."""
+        response = client.post(
+            reverse("django_database_task:purge_completed_tasks"),
+            data=json.dumps({"days": -1}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 400
+        assert "non-negative integer" in response.json()["error"]
+
+    def test_purge_rejects_invalid_batch_size(self, client):
+        """Test that invalid batch_size returns 400."""
+        response = client.post(
+            reverse("django_database_task:purge_completed_tasks"),
+            data=json.dumps({"batch_size": 0}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 400
+        assert "positive integer" in response.json()["error"]
+
+    def test_purge_rejects_excessive_batch_size(self, client):
+        """Test that batch_size > 10000 returns 400."""
+        response = client.post(
+            reverse("django_database_task:purge_completed_tasks"),
+            data=json.dumps({"batch_size": 10001}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 400
+        assert "cannot exceed 10000" in response.json()["error"]
+
+    def test_purge_rejects_invalid_status(self, client):
+        """Test that invalid status returns 400."""
+        response = client.post(
+            reverse("django_database_task:purge_completed_tasks"),
+            data=json.dumps({"status": "INVALID"}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 400
+        assert "No valid statuses" in response.json()["error"]

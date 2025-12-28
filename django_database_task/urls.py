@@ -56,7 +56,13 @@ Example:
 
 from django.urls import path
 
-from .views import ExecuteTaskView, RunOneTaskView, RunTasksView, TaskStatusView
+from .views import (
+    ExecuteTaskView,
+    PurgeCompletedTasksView,
+    RunOneTaskView,
+    RunTasksView,
+    TaskStatusView,
+)
 
 app_name = "django_database_task"
 
@@ -65,4 +71,5 @@ urlpatterns = [
     path("run-one/", RunOneTaskView.as_view(), name="run_one_task"),
     path("status/", TaskStatusView.as_view(), name="task_status"),
     path("execute/<uuid:task_id>/", ExecuteTaskView.as_view(), name="execute_task"),
+    path("purge/", PurgeCompletedTasksView.as_view(), name="purge_completed_tasks"),
 ]

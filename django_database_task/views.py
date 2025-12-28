@@ -16,10 +16,12 @@ Usage:
 """
 
 import json
+from datetime import timedelta
 
 from django.http import JsonResponse
 from django.tasks import default_task_backend
 from django.tasks.base import TaskResultStatus
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
@@ -359,3 +361,117 @@ class ExecuteTaskView(View):
             return JsonResponse(response_data, status=500)
 
         return JsonResponse(response_data)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class PurgeCompletedTasksView(View):
+    """
+    Delete completed tasks via HTTP POST.
+
+    This endpoint is useful for cron-based cleanup of completed tasks
+    when management commands cannot be executed directly.
+
+    POST parameters (JSON body):
+        days: Delete tasks completed more than N days ago (0=all, default: 0)
+        status: Target statuses, comma-separated (default: "SUCCESSFUL,FAILED")
+        batch_size: Number of tasks to delete at once (default: 1000, max: 10000)
+        dry_run: If true, return count without deleting (default: false)
+
+    Response:
+        {
+            "deleted": 150,
+            "dry_run": false
+        }
+
+    Response (dry run):
+        {
+            "count": 150,
+            "dry_run": true
+        }
+
+    Response (error):
+        {
+            "error": "Error message"
+        }
+
+    Security:
+        - Only accepts POST requests
+        - CSRF exempt (intended for API/cron use)
+        - Consider adding authentication in your URL configuration
+    """
+
+    http_method_names = ["post"]
+
+    def post(self, request):
+        backend_name = request.GET.get("backend_name", "default")
+
+        # Get backend and check for auth handler
+        backend = get_backend(backend_name)
+        if hasattr(backend, "get_auth_handler"):
+            auth_handler = backend.get_auth_handler()
+            if auth_handler:
+                error_response = auth_handler(request)
+                if error_response:
+                    return error_response
+
+        # Parse JSON body if present
+        try:
+            if request.body:
+                data = json.loads(request.body)
+            else:
+                data = {}
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+        days = data.get("days", 0)
+        status_str = data.get("status", "SUCCESSFUL,FAILED")
+        batch_size = data.get("batch_size", 1000)
+        dry_run = data.get("dry_run", False)
+
+        # Validate parameters
+        if not isinstance(days, int) or days < 0:
+            return JsonResponse(
+                {"error": "days must be a non-negative integer"}, status=400
+            )
+
+        if not isinstance(batch_size, int) or batch_size < 1:
+            return JsonResponse(
+                {"error": "batch_size must be a positive integer"}, status=400
+            )
+        if batch_size > 10000:
+            return JsonResponse({"error": "batch_size cannot exceed 10000"}, status=400)
+
+        # Parse statuses
+        statuses = [s.strip().upper() for s in status_str.split(",")]
+        valid_statuses = [TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED]
+        statuses = [s for s in statuses if s in [v.value for v in valid_statuses]]
+
+        if not statuses:
+            return JsonResponse({"error": "No valid statuses specified"}, status=400)
+
+        # Build query
+        queryset = DatabaseTask.objects.filter(status__in=statuses)
+
+        if days > 0:
+            cutoff_date = timezone.now() - timedelta(days=days)
+            queryset = queryset.filter(finished_at__lt=cutoff_date)
+
+        total_count = queryset.count()
+
+        if dry_run:
+            return JsonResponse({"count": total_count, "dry_run": True})
+
+        if total_count == 0:
+            return JsonResponse({"deleted": 0, "dry_run": False})
+
+        # Batch delete
+        deleted_total = 0
+        while True:
+            task_ids = list(queryset.values_list("id", flat=True)[:batch_size])
+            if not task_ids:
+                break
+
+            deleted_count, _ = DatabaseTask.objects.filter(id__in=task_ids).delete()
+            deleted_total += deleted_count
+
+        return JsonResponse({"deleted": deleted_total, "dry_run": False})
