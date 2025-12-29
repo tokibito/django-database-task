@@ -1,5 +1,10 @@
 # django-database-task
 
+[![CI](https://github.com/tokibito/django-database-task/actions/workflows/ci.yml/badge.svg)](https://github.com/tokibito/django-database-task/actions/workflows/ci.yml)
+[![PyPI version](https://badge.fury.io/py/django-database-task.svg)](https://badge.fury.io/py/django-database-task)
+[![Python versions](https://img.shields.io/pypi/pyversions/django-database-task.svg)](https://pypi.org/project/django-database-task/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A database-backed task queue backend for Django 6.0's built-in task framework.
 
 ## Features
