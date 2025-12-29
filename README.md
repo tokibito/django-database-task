@@ -681,8 +681,8 @@ When `OIDC_SERVICE_ACCOUNT_EMAIL` is configured, Cloud Tasks will send OIDC toke
 TASKS = {
     "default": {
         "BACKEND": "django_database_task.cloudtasks.CloudTasksDatabaseBackend",
+        "QUEUES": [],  # Allow all queue names
         "OPTIONS": {
-            "CLOUD_TASKS_QUEUE": "default",
             "OIDC_SERVICE_ACCOUNT_EMAIL": "my-sa@project.iam.gserviceaccount.com",
             # OIDC_AUDIENCE is auto-detected from handler URL if not set
         },
