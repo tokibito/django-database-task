@@ -156,6 +156,16 @@
                 <button type="submit">Enqueue</button>
             </form>
         </div>
+
+        <div class="task-card">
+            <h3>Newsletter (emails queue)</h3>
+            <p>Task using a separate 'emails' queue</p>
+            <form method="post" action="{% url 'enqueue_newsletter' %}">
+                {% csrf_token %}
+                <input type="number" name="subscriber_count" placeholder="Subscribers" value="100">
+                <button type="submit">Enqueue</button>
+            </form>
+        </div>
     </div>
 
     <h2>Recent Tasks</h2>

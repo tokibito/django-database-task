@@ -13,6 +13,7 @@ urlpatterns = [
     path("enqueue/priority/", views.enqueue_priority, name="enqueue_priority"),
     path("enqueue/delayed/", views.enqueue_delayed, name="enqueue_delayed"),
     path("enqueue/context/", views.enqueue_context, name="enqueue_context"),
+    path("enqueue/newsletter/", views.enqueue_newsletter, name="enqueue_newsletter"),
     path("result/<uuid:task_id>/", views.result, name="result"),
     path("tasks/json/", views.task_list_json, name="task_list_json"),
 ]

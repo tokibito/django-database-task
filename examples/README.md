@@ -65,6 +65,21 @@ cd examples
 2. Start the worker
 3. Verify status is FAILED with error information recorded
 
+### Context-Aware Task
+
+1. Enqueue "Context Task" with a message
+2. Start the worker
+3. Verify the result includes task ID and attempt number from context
+
+### Queue-Specific Tasks (Newsletter)
+
+1. Enqueue "Newsletter" task (uses 'emails' queue)
+2. Start the worker with `--queue emails` option:
+   ```bash
+   ../venv/bin/python manage.py run_database_tasks --queue emails --continuous
+   ```
+3. Verify the task is processed only by the emails queue worker
+
 ## Purge Completed Tasks
 
 ```bash
@@ -89,9 +104,17 @@ cd examples
 
 ```python
 # Enqueue a task
-from demo_app.tasks import add_numbers, send_email_task
+from demo_app.tasks import add_numbers, send_email_task, newsletter_task, context_aware_task
 result = add_numbers.enqueue(10, 20)
 print(f"Task ID: {result.id}")
+
+# Enqueue a task with specific queue
+result = newsletter_task.enqueue(100)
+print(f"Newsletter Task ID: {result.id}, Queue: emails")
+
+# Enqueue a context-aware task
+result = context_aware_task.enqueue("Hello from shell!")
+print(f"Context Task ID: {result.id}")
 
 # Delayed execution
 from datetime import timedelta

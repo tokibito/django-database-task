@@ -82,6 +82,14 @@ def enqueue_context(request):
     return redirect("result", task_id=result.id)
 
 
+@require_POST
+def enqueue_newsletter(request):
+    """Enqueue newsletter task (uses 'emails' queue)."""
+    subscriber_count = int(request.POST.get("subscriber_count", 100))
+    result = tasks.newsletter_task.enqueue(subscriber_count)
+    return redirect("result", task_id=result.id)
+
+
 def result(request, task_id):
     """Display task result."""
     try:

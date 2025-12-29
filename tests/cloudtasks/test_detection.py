@@ -45,23 +45,15 @@ class TestDetectGcpLocation:
         monkeypatch.setenv("CLOUD_RUN_REGION", "asia-northeast1")
         assert detect_gcp_location() == "asia-northeast1"
 
-    def test_from_gae_region(self, monkeypatch):
-        """Should detect location from GAE_REGION."""
-        monkeypatch.delenv("CLOUD_RUN_REGION", raising=False)
-        monkeypatch.setenv("GAE_REGION", "us-central1")
-        assert detect_gcp_location() == "us-central1"
-
     def test_from_google_cloud_region(self, monkeypatch):
         """Should detect location from GOOGLE_CLOUD_REGION."""
         monkeypatch.delenv("CLOUD_RUN_REGION", raising=False)
-        monkeypatch.delenv("GAE_REGION", raising=False)
         monkeypatch.setenv("GOOGLE_CLOUD_REGION", "europe-west1")
         assert detect_gcp_location() == "europe-west1"
 
     def test_returns_none_when_not_detected(self, monkeypatch):
         """Should return None when no environment variables are set."""
         monkeypatch.delenv("CLOUD_RUN_REGION", raising=False)
-        monkeypatch.delenv("GAE_REGION", raising=False)
         monkeypatch.delenv("GOOGLE_CLOUD_REGION", raising=False)
         assert detect_gcp_location() is None
 
