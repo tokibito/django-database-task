@@ -2,7 +2,7 @@
 django-database-task: A database-backed task queue backend for Django 6.0's task framework.
 """
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 
 def __getattr__(name):
