@@ -571,14 +571,29 @@ pip install django-database-task[cloudtasks]
 TASKS = {
     "default": {
         "BACKEND": "django_database_task.cloudtasks.CloudTasksDatabaseBackend",
-        "OPTIONS": {
-            "CLOUD_TASKS_QUEUE": "default",  # Only required setting
-        },
     },
 }
 ```
 
-Project ID, location, and handler URL are auto-detected from GAE/Cloud Run environment variables.
+That's it! Project ID, location, and handler URL are auto-detected from GAE/Cloud Run environment.
+
+The Cloud Tasks queue name is determined by the task's `queue_name` attribute:
+
+```python
+@task  # Uses "default" queue
+def normal_task():
+    pass
+
+@task(queue="batch")  # Uses "batch" queue
+def batch_task():
+    pass
+
+@task(queue="high-priority")  # Uses "high-priority" queue
+def urgent_task():
+    pass
+```
+
+This allows you to configure different rate limits and concurrency settings per queue in Cloud Tasks.
 
 ### How It Works
 
@@ -626,10 +641,9 @@ TASKS = {
     "default": {
         "BACKEND": "django_database_task.cloudtasks.CloudTasksDatabaseBackend",
         "OPTIONS": {
-            # Required
-            "CLOUD_TASKS_QUEUE": "default",
+            # All settings are optional - auto-detected from environment
 
-            # Auto-detected (override if needed)
+            # Override auto-detection if needed
             # "CLOUD_TASKS_PROJECT": "my-project",
             # "CLOUD_TASKS_LOCATION": "asia-northeast1",
             # "TASK_HANDLER_URL": "https://myapp.example.com/tasks/execute/{task_id}/",
@@ -645,11 +659,12 @@ TASKS = {
 
 ### Auto-Detection
 
-| Setting | Environment Variable | Description |
-|---------|---------------------|-------------|
-| Project | `GOOGLE_CLOUD_PROJECT` | GCP project ID |
-| Location | `CLOUD_RUN_REGION` / `GAE_REGION` | Cloud Tasks region |
+| Setting | Detection Method | Description |
+|---------|------------------|-------------|
+| Project | `GOOGLE_CLOUD_PROJECT` env var | GCP project ID |
+| Location | `CLOUD_RUN_REGION` env var, or metadata server | Cloud Tasks region |
 | Handler URL | Built from `K_SERVICE`, `GAE_SERVICE`, `GAE_VERSION` | Task execution endpoint |
+| Queue name | Task's `queue_name` attribute | Defaults to "default" |
 
 ### OIDC Authentication
 

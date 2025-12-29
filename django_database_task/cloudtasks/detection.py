@@ -31,7 +31,7 @@ def detect_gcp_project():
 
 def detect_gcp_location():
     """
-    Detect Cloud Tasks location (region) from environment variables.
+    Detect Cloud Tasks location (region) from environment variables or metadata server.
 
     Returns:
         Region string or None if not detected.
@@ -41,14 +41,51 @@ def detect_gcp_location():
     if region:
         return region
 
-    # GAE: Check for region environment variables
-    region = os.environ.get("GAE_REGION") or os.environ.get("GOOGLE_CLOUD_REGION")
+    # Explicit environment variable (works for any environment)
+    region = os.environ.get("GOOGLE_CLOUD_REGION")
     if region:
         return region
 
-    # Note: GAE may not provide region via environment variables
-    # In that case, explicit configuration is required
+    # GAE/GCE: Query metadata server for zone and extract region
+    region = _detect_region_from_metadata()
+    if region:
+        return region
+
     return None
+
+
+def _detect_region_from_metadata():
+    """
+    Detect region from GCP metadata server.
+
+    The metadata server returns zone in format:
+    projects/PROJECT_NUMBER/zones/ZONE_NAME (e.g., projects/12345/zones/us-central1-a)
+
+    We extract the region by removing the zone suffix (e.g., us-central1).
+
+    Returns:
+        Region string or None if not available.
+    """
+    import urllib.request
+    import urllib.error
+
+    metadata_url = "http://metadata.google.internal/computeMetadata/v1/instance/zone"
+    headers = {"Metadata-Flavor": "Google"}
+
+    try:
+        request = urllib.request.Request(metadata_url, headers=headers)
+        with urllib.request.urlopen(request, timeout=2) as response:
+            # Response format: projects/PROJECT_NUMBER/zones/ZONE_NAME
+            zone_path = response.read().decode("utf-8")
+            # Extract zone name (last part)
+            zone = zone_path.split("/")[-1]
+            # Extract region by removing the last part (e.g., us-central1-a -> us-central1)
+            # Zone format: {region}-{zone_letter} (e.g., us-central1-a, asia-northeast1-b)
+            region = "-".join(zone.rsplit("-", 1)[:-1])
+            return region if region else None
+    except (urllib.error.URLError, OSError):
+        # Metadata server not available (local development, etc.)
+        return None
 
 
 def detect_default_service_account():

@@ -37,22 +37,23 @@ class CloudTasksDatabaseBackend(DatabaseTaskBackend):
         TASKS = {
             "default": {
                 "BACKEND": "django_database_task.cloudtasks.CloudTasksDatabaseBackend",
-                "OPTIONS": {
-                    "CLOUD_TASKS_QUEUE": "default",
-                },
             },
         }
+
+    The Cloud Tasks queue name is determined by the task's queue_name attribute.
+    For example:
+        @task(queue="high-priority")
+        def urgent_task():
+            ...
+    will use the "high-priority" Cloud Tasks queue.
+
+    Tasks without explicit queue use Django's DEFAULT_TASK_QUEUE_NAME ("default").
     """
 
     def __init__(self, alias, params):
         super().__init__(alias, params)
 
         options = params.get("OPTIONS", {})
-
-        # Required: Queue name
-        self.queue_name = options.get("CLOUD_TASKS_QUEUE")
-        if not self.queue_name:
-            raise ImproperlyConfigured("CLOUD_TASKS_QUEUE is required in TASKS OPTIONS")
 
         # Auto-detected or explicit: Project ID
         self.project = options.get("CLOUD_TASKS_PROJECT") or detect_gcp_project()
@@ -188,12 +189,15 @@ class CloudTasksDatabaseBackend(DatabaseTaskBackend):
 
         The Cloud Task only contains the task ID in the URL.
         Task parameters are retrieved from the database when executed.
+
+        The Cloud Tasks queue name is taken from the task's queue_name attribute.
         """
-        # Build queue path
+        # Build queue path using task's queue_name
+        queue_name = task_result.task.queue_name
         parent = self.client.queue_path(
             self.project,
             self.location,
-            self.queue_name,
+            queue_name,
         )
 
         # Build task handler URL (contains only task ID)
