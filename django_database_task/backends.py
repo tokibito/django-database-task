@@ -169,15 +169,19 @@ class DatabaseTaskBackend(BaseTaskBackend):
             args = db_task.args_json
             kwargs = db_task.kwargs_json.copy()
 
+            # Execute task
+            # If takes_context, pass TaskContext as first positional argument
             if takes_context:
                 context = TaskContext(task_result=task_result)
-                kwargs["context"] = context
-
-            # Execute task
-            if iscoroutinefunction(func):
-                return_value = asyncio.run(func(*args, **kwargs))
+                if iscoroutinefunction(func):
+                    return_value = asyncio.run(func(context, *args, **kwargs))
+                else:
+                    return_value = func(context, *args, **kwargs)
             else:
-                return_value = func(*args, **kwargs)
+                if iscoroutinefunction(func):
+                    return_value = asyncio.run(func(*args, **kwargs))
+                else:
+                    return_value = func(*args, **kwargs)
 
             # Normalize return value for JSON serialization
             # This will raise TypeError for unsupported types
