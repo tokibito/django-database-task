@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import traceback
 from importlib import import_module
 from inspect import iscoroutinefunction
@@ -9,6 +10,8 @@ from django.tasks.exceptions import TaskResultDoesNotExist
 from django.tasks.signals import task_enqueued, task_finished, task_started
 from django.utils import timezone
 from django.utils.json import normalize_json
+
+logger = logging.getLogger("django_database_task")
 
 
 class DatabaseTaskBackend(BaseTaskBackend):
@@ -200,6 +203,20 @@ class DatabaseTaskBackend(BaseTaskBackend):
                 ]
             )
 
+            # Send signal for success
+            db_task.refresh_from_db()
+            final_result = self._db_task_to_result(db_task, task)
+            # Note: Django's task_finished handler logs "NoneType: None" after this
+            # due to exc_info=sys.exc_info() being called outside exception context.
+            # This is a known Django issue and will be fixed upstream.
+            logger.info(
+                "Task completed successfully: id=%s path=%s",
+                final_result.id,
+                db_task.task_path,
+            )
+            task_finished.send(sender=self.__class__, task_result=final_result)
+            return final_result
+
         except Exception as e:
             # Failure
             error = TaskError(
@@ -221,9 +238,14 @@ class DatabaseTaskBackend(BaseTaskBackend):
                 update_fields=["status", "errors_json", "finished_at", "updated_at"]
             )
 
-        # Get final result and send signal
-        db_task.refresh_from_db()
-        final_result = self._db_task_to_result(db_task, task)
-        task_finished.send(sender=self.__class__, task_result=final_result)
-
-        return final_result
+            # Send signal for failure (with exception context for Django's logging)
+            db_task.refresh_from_db()
+            final_result = self._db_task_to_result(db_task, task)
+            logger.error(
+                "Task failed: id=%s path=%s error=%s",
+                final_result.id,
+                db_task.task_path,
+                error.exception_class_path,
+            )
+            task_finished.send(sender=self.__class__, task_result=final_result)
+            return final_result

@@ -5,11 +5,15 @@ Provides authentication handler and decorator for verifying OIDC tokens
 sent by Cloud Tasks.
 """
 
+import logging
+import traceback
 from functools import wraps
 
 from django.http import JsonResponse
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
+
+logger = logging.getLogger("django_database_task.cloudtasks.auth")
 
 
 def create_oidc_auth_handler(audience):
@@ -64,8 +68,31 @@ def create_oidc_auth_handler(audience):
             # Attach claims to request for use in view
             request.cloud_tasks_claims = claims
 
+            # Log successful verification
+            service_account = claims.get("email", "unknown")
+            logger.info(
+                "OIDC token verified successfully: service_account=%s audience=%s",
+                service_account,
+                audience,
+            )
+
         except Exception as e:
-            return JsonResponse({"error": f"Invalid token: {e}"}, status=401)
+            # Log the full exception for debugging
+            # Use print as fallback since logging config may not capture this logger
+            error_type = type(e).__name__
+            error_msg = str(e) if str(e) else "No details available"
+            tb = traceback.format_exc()
+            full_error = (
+                f"OIDC token verification failed: {error_type}: {error_msg}\n{tb}"
+            )
+            logger.error(full_error)
+            # Also print to stderr for environments where logging is not configured
+            import sys
+
+            print(full_error, file=sys.stderr)
+            return JsonResponse(
+                {"error": f"Invalid token: {error_type}: {error_msg}"}, status=401
+            )
 
         return None
 

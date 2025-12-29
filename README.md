@@ -681,6 +681,40 @@ TASKS = {
 
 When `OIDC_SERVICE_ACCOUNT_EMAIL` is configured, Cloud Tasks will send OIDC tokens with each request. The backend automatically verifies these tokens on the `/tasks/execute/` and `/tasks/purge/` endpoints.
 
+#### Required IAM Roles
+
+To use OIDC authentication, the following IAM roles are required:
+
+| Role | Description |
+|------|-------------|
+| `roles/cloudtasks.enqueuer` | Required to create tasks in Cloud Tasks queues |
+| `roles/iam.serviceAccountUser` | Required to specify the OIDC service account when creating tasks |
+
+**Setup:**
+
+1. Create a service account for OIDC token generation:
+   ```bash
+   gcloud iam service-accounts create cloud-tasks-invoker \
+       --display-name="Cloud Tasks Invoker"
+   ```
+
+2. Grant the Cloud Tasks Enqueuer role to the service account running your application (e.g., App Engine default service account):
+   ```bash
+   gcloud projects add-iam-policy-binding PROJECT_ID \
+       --member="serviceAccount:PROJECT_ID@appspot.gserviceaccount.com" \
+       --role="roles/cloudtasks.enqueuer"
+   ```
+
+3. Grant the Service Account User role to allow impersonation of the OIDC service account:
+   ```bash
+   gcloud iam service-accounts add-iam-policy-binding \
+       cloud-tasks-invoker@PROJECT_ID.iam.gserviceaccount.com \
+       --member="serviceAccount:PROJECT_ID@appspot.gserviceaccount.com" \
+       --role="roles/iam.serviceAccountUser"
+   ```
+
+**Note:** The OIDC service account specified in `OIDC_SERVICE_ACCOUNT_EMAIL` does not need any additional roles. It is only used to generate the OIDC token that is included in the HTTP request to your task handler.
+
 ```python
 # settings.py - Automatic OIDC verification
 TASKS = {
@@ -688,7 +722,7 @@ TASKS = {
         "BACKEND": "django_database_task.cloudtasks.CloudTasksDatabaseBackend",
         "QUEUES": [],  # Allow all queue names
         "OPTIONS": {
-            "OIDC_SERVICE_ACCOUNT_EMAIL": "my-sa@project.iam.gserviceaccount.com",
+            "OIDC_SERVICE_ACCOUNT_EMAIL": "cloud-tasks-invoker@PROJECT_ID.iam.gserviceaccount.com",
             # OIDC_AUDIENCE is auto-detected from handler URL if not set
         },
     },
