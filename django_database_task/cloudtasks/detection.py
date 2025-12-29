@@ -66,8 +66,8 @@ def _detect_region_from_metadata():
     Returns:
         Region string or None if not available.
     """
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     metadata_url = "http://metadata.google.internal/computeMetadata/v1/instance/zone"
     headers = {"Metadata-Flavor": "Google"}
