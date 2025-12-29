@@ -571,11 +571,17 @@ pip install django-database-task[cloudtasks]
 TASKS = {
     "default": {
         "BACKEND": "django_database_task.cloudtasks.CloudTasksDatabaseBackend",
+        "QUEUES": [],  # Allow all queue names
     },
 }
 ```
 
-That's it! Project ID, location, and handler URL are auto-detected from GAE/Cloud Run environment.
+Project ID, location, and handler URL are auto-detected from GAE/Cloud Run environment.
+
+**Important**: Set `QUEUES: []` to allow any queue name, or list the queues you use:
+```python
+"QUEUES": ["default", "emails", "batch"],  # Only these queues allowed
+```
 
 The Cloud Tasks queue name is determined by the task's `queue_name` attribute:
 
