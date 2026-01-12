@@ -322,7 +322,7 @@ urlpatterns = [
 | `/tasks/run-one/` | POST | Process a single pending task |
 | `/tasks/status/` | GET | Get pending task count |
 | `/tasks/execute/<uuid>/` | POST | Execute a specific task by ID |
-| `/tasks/purge/` | POST | Delete completed tasks |
+| `/tasks/purge/` | GET, POST | Delete completed tasks |
 
 ### Request Parameters
 
@@ -398,9 +398,13 @@ Response (task not found):
 {"error": "Task not found"}  // HTTP 404
 ```
 
-#### POST `/tasks/purge/`
+#### GET/POST `/tasks/purge/`
 
 Delete completed tasks from the database. Useful for cron-based cleanup.
+
+**Note:** GET method is supported for GAE cron compatibility (GAE cron only supports GET requests).
+
+**POST parameters (JSON body):**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -408,6 +412,15 @@ Delete completed tasks from the database. Useful for cron-based cleanup.
 | `status` | string | "SUCCESSFUL,FAILED" | Target statuses, comma-separated |
 | `batch_size` | int | 1000 | Number of tasks to delete at once (max: 10000) |
 | `dry_run` | bool | false | If true, return count without deleting |
+
+**GET query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | int | 0 | Delete tasks completed more than N days ago (0=all) |
+| `status` | string | "SUCCESSFUL,FAILED" | Target statuses, comma-separated |
+| `batch_size` | int | 1000 | Number of tasks to delete at once (max: 10000) |
+| `dry_run` | string | "false" | If "true", return count without deleting |
 
 Response:
 ```json
@@ -435,15 +448,21 @@ curl -X POST http://localhost:8000/tasks/run/ \
 # Get pending task count
 curl http://localhost:8000/tasks/status/
 
-# Delete tasks completed more than 7 days ago
+# Delete tasks completed more than 7 days ago (POST)
 curl -X POST http://localhost:8000/tasks/purge/ \
   -H "Content-Type: application/json" \
   -d '{"days": 7}'
+
+# Delete tasks completed more than 7 days ago (GET - for GAE cron)
+curl "http://localhost:8000/tasks/purge/?days=7"
 
 # Dry run to check how many tasks would be deleted
 curl -X POST http://localhost:8000/tasks/purge/ \
   -H "Content-Type: application/json" \
   -d '{"days": 30, "dry_run": true}'
+
+# Dry run via GET
+curl "http://localhost:8000/tasks/purge/?days=30&dry_run=true"
 ```
 
 ### Use Cases

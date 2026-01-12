@@ -366,10 +366,16 @@ class ExecuteTaskView(View):
 @method_decorator(csrf_exempt, name="dispatch")
 class PurgeCompletedTasksView(View):
     """
-    Delete completed tasks via HTTP POST.
+    Delete completed tasks via HTTP GET or POST.
 
     This endpoint is useful for cron-based cleanup of completed tasks
     when management commands cannot be executed directly.
+
+    GET query parameters:
+        days: Delete tasks completed more than N days ago (0=all, default: 0)
+        status: Target statuses, comma-separated (default: "SUCCESSFUL,FAILED")
+        batch_size: Number of tasks to delete at once (default: 1000, max: 10000)
+        dry_run: If "true", return count without deleting (default: "false")
 
     POST parameters (JSON body):
         days: Delete tasks completed more than N days ago (0=all, default: 0)
@@ -395,14 +401,57 @@ class PurgeCompletedTasksView(View):
         }
 
     Security:
-        - Only accepts POST requests
+        - Accepts GET and POST requests
         - CSRF exempt (intended for API/cron use)
         - Consider adding authentication in your URL configuration
+
+    GAE Cron:
+        GAE cron only supports GET requests. Use query parameters:
+        GET /tasks/purge/?days=7&status=SUCCESSFUL,FAILED
     """
 
-    http_method_names = ["post"]
+    http_method_names = ["get", "post"]
 
-    def post(self, request):
+    def _get_params(self, request):
+        """Extract parameters from GET query string or POST JSON body."""
+        if request.method == "GET":
+            days_str = request.GET.get("days", "0")
+            try:
+                days = int(days_str)
+            except ValueError:
+                return None, {"error": "days must be an integer"}
+
+            batch_size_str = request.GET.get("batch_size", "1000")
+            try:
+                batch_size = int(batch_size_str)
+            except ValueError:
+                return None, {"error": "batch_size must be an integer"}
+
+            return {
+                "days": days,
+                "status": request.GET.get("status", "SUCCESSFUL,FAILED"),
+                "batch_size": batch_size,
+                "dry_run": request.GET.get("dry_run", "").lower() == "true",
+            }, None
+        else:
+            # POST - parse JSON body
+            try:
+                if request.body:
+                    data = json.loads(request.body)
+                else:
+                    data = {}
+            except json.JSONDecodeError:
+                return None, {"error": "Invalid JSON"}
+
+            return {
+                "days": data.get("days", 0),
+                "status": data.get("status", "SUCCESSFUL,FAILED"),
+                "batch_size": data.get("batch_size", 1000),
+                "dry_run": data.get("dry_run", False),
+            }, None
+
+    def _purge(self, request):
+        """Common purge logic for GET and POST."""
         backend_name = request.GET.get("backend_name", "default")
 
         # Get backend and check for auth handler
@@ -414,19 +463,15 @@ class PurgeCompletedTasksView(View):
                 if error_response:
                     return error_response
 
-        # Parse JSON body if present
-        try:
-            if request.body:
-                data = json.loads(request.body)
-            else:
-                data = {}
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        # Get parameters
+        params, error = self._get_params(request)
+        if error:
+            return JsonResponse(error, status=400)
 
-        days = data.get("days", 0)
-        status_str = data.get("status", "SUCCESSFUL,FAILED")
-        batch_size = data.get("batch_size", 1000)
-        dry_run = data.get("dry_run", False)
+        days = params["days"]
+        status_str = params["status"]
+        batch_size = params["batch_size"]
+        dry_run = params["dry_run"]
 
         # Validate parameters
         if not isinstance(days, int) or days < 0:
@@ -475,3 +520,9 @@ class PurgeCompletedTasksView(View):
             deleted_total += deleted_count
 
         return JsonResponse({"deleted": deleted_total, "dry_run": False})
+
+    def get(self, request):
+        return self._purge(request)
+
+    def post(self, request):
+        return self._purge(request)

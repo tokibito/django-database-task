@@ -738,10 +738,66 @@ class TestPurgeCompletedTasksView:
         data = response.json()
         assert data["deleted"] == 0
 
-    def test_purge_rejects_get(self, client):
-        """Test that GET method is not allowed."""
+    def test_purge_via_get(self, client):
+        """Test that GET method works for GAE cron compatibility."""
+        # Create a completed task
+        DatabaseTask.objects.create(
+            task_path="tests.test_executor.sample_task",
+            queue_name="default",
+            priority=0,
+            args_json=[1, 2],
+            kwargs_json={},
+            status=TaskResultStatus.SUCCESSFUL,
+            enqueued_at=timezone.now(),
+            finished_at=timezone.now(),
+            backend_name="default",
+        )
         response = client.get(reverse("django_database_task:purge_completed_tasks"))
-        assert response.status_code == 405
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] == 1
+        assert data["dry_run"] is False
+
+    def test_purge_via_get_with_params(self, client):
+        """Test GET method with query parameters."""
+        # Create a completed task
+        DatabaseTask.objects.create(
+            task_path="tests.test_executor.sample_task",
+            queue_name="default",
+            priority=0,
+            args_json=[1, 2],
+            kwargs_json={},
+            status=TaskResultStatus.SUCCESSFUL,
+            enqueued_at=timezone.now(),
+            finished_at=timezone.now(),
+            backend_name="default",
+        )
+        response = client.get(
+            reverse("django_database_task:purge_completed_tasks"),
+            {"days": "0", "status": "SUCCESSFUL", "dry_run": "true"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 1
+        assert data["dry_run"] is True
+
+    def test_purge_via_get_invalid_days(self, client):
+        """Test GET method with invalid days parameter."""
+        response = client.get(
+            reverse("django_database_task:purge_completed_tasks"),
+            {"days": "abc"},
+        )
+        assert response.status_code == 400
+        assert "days must be an integer" in response.json()["error"]
+
+    def test_purge_via_get_invalid_batch_size(self, client):
+        """Test GET method with invalid batch_size parameter."""
+        response = client.get(
+            reverse("django_database_task:purge_completed_tasks"),
+            {"batch_size": "abc"},
+        )
+        assert response.status_code == 400
+        assert "batch_size must be an integer" in response.json()["error"]
 
     def test_purge_rejects_invalid_json(self, client):
         """Test that invalid JSON returns 400."""
