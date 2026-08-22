@@ -6,27 +6,96 @@ from functools import cached_property
 from importlib import import_module
 from inspect import iscoroutinefunction
 
+from django.core.exceptions import ImproperlyConfigured
 from django.tasks.backends.base import BaseTaskBackend
 from django.tasks.base import Task, TaskContext, TaskError, TaskResult, TaskResultStatus
 from django.tasks.exceptions import TaskResultDoesNotExist
 from django.tasks.signals import task_enqueued, task_finished, task_started
 from django.utils import timezone
 from django.utils.json import normalize_json
+from django.utils.module_loading import import_string
 
 logger = logging.getLogger("django_database_task")
 
 
 class DatabaseTaskBackend(BaseTaskBackend):
-    """A task backend that persists tasks in the database."""
+    """
+    A task backend that persists tasks in the database.
+
+    A broker can be attached to notify an external service (Cloud Tasks,
+    for example) whenever a task is saved. Subclasses name theirs with
+    broker_class; projects can also name one with the BROKER option:
+
+        TASKS = {
+            "default": {
+                "BACKEND": "django_database_task.backends.DatabaseTaskBackend",
+                "OPTIONS": {"BROKER": "myproject.brokers.MyBroker"},
+            },
+        }
+
+    Without a broker the tasks are only picked up by run_database_tasks or
+    the HTTP endpoints, which is the default.
+    """
 
     supports_defer = True
     supports_async_task = True
     supports_get_result = True
     supports_priority = True
 
+    # Dotted path to the broker class, or the class itself. The BROKER
+    # option takes precedence over it.
+    broker_class = None
+
     # Set on an instance once its deprecated get_auth_handler() override has
     # been reported, so the warning is emitted once per backend.
     _legacy_auth_handler_warned = False
+
+    def __init__(self, alias, params):
+        super().__init__(alias, params)
+        # Built eagerly so a misconfigured broker is reported when the
+        # backend is set up rather than on the first enqueue.
+        self.broker = self.create_broker()
+
+    def create_broker(self):
+        """
+        Build the broker this backend notifies, or None for no broker.
+
+        Returns:
+            TaskBroker or None
+        """
+        broker_class = self.options.get("BROKER", self.broker_class)
+        if broker_class is None:
+            return None
+
+        if isinstance(broker_class, str):
+            try:
+                broker_class = import_string(broker_class)
+            except ImportError as e:
+                raise ImproperlyConfigured(
+                    f"Could not import task broker {broker_class!r}: {e}"
+                ) from e
+
+        return broker_class(self, self.options)
+
+    def notify_broker(self, task_result):
+        """
+        Tell the broker about a task that was just saved.
+
+        A broker failure is logged and swallowed: the task is in the
+        database, so run_database_tasks and the HTTP endpoints can still
+        pick it up. That makes them the fallback when the broker is down.
+        """
+        if self.broker is None:
+            return
+
+        try:
+            self.broker.enqueue(task_result)
+        except Exception:
+            logger.exception(
+                "Broker %s failed to enqueue task %s",
+                type(self.broker).__name__,
+                task_result.id,
+            )
 
     def get_auth_handler(self):
         """
@@ -45,9 +114,9 @@ class DatabaseTaskBackend(BaseTaskBackend):
         """
         return None
 
-    # Marks the implementation above as the default one, so an override in a
-    # subclass can be told apart from it.
-    get_auth_handler._is_default_auth_handler = True
+    # Marks the implementation above as one of this library's own, so an
+    # override written by a project can be told apart from it.
+    get_auth_handler._is_library_auth_handler = True
 
     def get_auth_handlers(self, endpoint=None):
         """
@@ -79,15 +148,22 @@ class DatabaseTaskBackend(BaseTaskBackend):
         """
         Get the handlers that authenticate the service calling the endpoints.
 
-        Subclasses that integrate with a task broker override this to verify
-        the broker's own credentials. The default implementation adapts a
-        deprecated get_auth_handler() override.
+        These come from the broker, which knows how the service it talks to
+        signs its requests. A deprecated get_auth_handler() override is
+        adapted here too.
 
         Returns:
             list of callables
         """
+        handlers = []
+        if self.broker is not None:
+            handlers.extend(self.broker.get_auth_handlers(endpoint) or [])
+
         handler = self._get_legacy_auth_handler()
-        return [handler] if handler is not None else []
+        if handler is not None:
+            handlers.append(handler)
+
+        return handlers
 
     def get_configured_auth_handlers(self, endpoint=None):
         """
@@ -113,18 +189,26 @@ class DatabaseTaskBackend(BaseTaskBackend):
         )
 
     def _get_legacy_auth_handler(self):
-        """Call a deprecated get_auth_handler() override, if there is one."""
+        """
+        Call a deprecated get_auth_handler() override written by a project.
+
+        Implementations this library ships are skipped: the no-op default
+        below and the compat shims on the bundled backends, which only
+        forward to their broker and would otherwise be counted twice.
+        """
         implementation = type(self).get_auth_handler
-        if not getattr(implementation, "_is_default_auth_handler", False):
-            if not self._legacy_auth_handler_warned:
-                warnings.warn(
-                    f"{type(self).__name__}.get_auth_handler() is deprecated and "
-                    "will be removed in django-database-task 0.5. Override "
-                    "get_auth_handlers() or get_broker_auth_handlers() instead.",
-                    DeprecationWarning,
-                    stacklevel=3,
-                )
-                self._legacy_auth_handler_warned = True
+        if getattr(implementation, "_is_library_auth_handler", False):
+            return None
+
+        if not self._legacy_auth_handler_warned:
+            warnings.warn(
+                f"{type(self).__name__}.get_auth_handler() is deprecated and "
+                "will be removed in django-database-task 0.5. Override "
+                "get_auth_handlers() or get_broker_auth_handlers() instead.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            self._legacy_auth_handler_warned = True
 
         return self.get_auth_handler()
 
@@ -164,6 +248,7 @@ class DatabaseTaskBackend(BaseTaskBackend):
 
         task_result = self._db_task_to_result(db_task, task)
         task_enqueued.send(sender=self.__class__, task_result=task_result)
+        self.notify_broker(task_result)
 
         return task_result
 

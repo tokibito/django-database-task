@@ -85,67 +85,6 @@ class TestCloudTasksDatabaseBackendInit:
         assert backend.location == "explicit-region"
 
 
-class TestCloudTasksDatabaseBackendGetTaskHandlerUrl:
-    """Tests for _get_task_handler_url method."""
-
-    @pytest.fixture
-    def backend(self, monkeypatch):
-        """Create a backend instance for testing."""
-        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-project")
-        monkeypatch.setenv("CLOUD_RUN_REGION", "asia-northeast1")
-        monkeypatch.setenv("K_SERVICE", "my-service")
-
-        from django_database_task.cloudtasks import CloudTasksDatabaseBackend
-
-        return CloudTasksDatabaseBackend("default", {"OPTIONS": {}})
-
-    def test_uses_explicit_url(self, monkeypatch):
-        """Should use TASK_HANDLER_URL when set."""
-        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-project")
-        monkeypatch.setenv("CLOUD_RUN_REGION", "asia-northeast1")
-
-        from django_database_task.cloudtasks import CloudTasksDatabaseBackend
-
-        backend = CloudTasksDatabaseBackend(
-            "default",
-            {
-                "OPTIONS": {
-                    "TASK_HANDLER_URL": "https://example.com/tasks/{task_id}/",
-                }
-            },
-        )
-
-        url = backend._get_task_handler_url("abc-123")
-        assert url == "https://example.com/tasks/abc-123/"
-
-    def test_auto_detects_host(self, backend):
-        """Should auto-detect host when TASK_HANDLER_URL is not set."""
-        url = backend._get_task_handler_url("abc-123")
-        expected = "https://my-service-my-project.asia-northeast1.run.app/tasks/execute/abc-123/"
-        assert url == expected
-
-    def test_custom_path(self, monkeypatch):
-        """Should use custom TASK_HANDLER_PATH."""
-        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-project")
-        monkeypatch.setenv("CLOUD_RUN_REGION", "asia-northeast1")
-        monkeypatch.setenv("K_SERVICE", "my-service")
-
-        from django_database_task.cloudtasks import CloudTasksDatabaseBackend
-
-        backend = CloudTasksDatabaseBackend(
-            "default",
-            {
-                "OPTIONS": {
-                    "TASK_HANDLER_PATH": "/api/v1/tasks/{task_id}/run/",
-                }
-            },
-        )
-
-        url = backend._get_task_handler_url("abc-123")
-        expected = "https://my-service-my-project.asia-northeast1.run.app/api/v1/tasks/abc-123/run/"
-        assert url == expected
-
-
 class TestCloudTasksDatabaseBackendEnqueue:
     """Tests for enqueue method."""
 
@@ -170,7 +109,7 @@ class TestCloudTasksDatabaseBackendEnqueue:
         )
         mock_client.create_task.return_value = MagicMock(name="task-name")
 
-        with patch.object(backend, "_client", mock_client):
+        with patch.object(backend.broker, "_client", mock_client):
             result = backend.enqueue(simple_task, (2, 3), {})
 
         # Verify task was saved to database
@@ -210,7 +149,7 @@ class TestCloudTasksDatabaseBackendEnqueue:
         mock_client = MagicMock()
         mock_client.create_task.return_value = MagicMock(name="task-name")
 
-        with patch.object(backend, "_client", mock_client):
+        with patch.object(backend.broker, "_client", mock_client):
             backend.enqueue(special_queue_task, (), {})
 
         mock_client.queue_path.assert_called_once_with(
@@ -227,14 +166,15 @@ class TestCloudTasksDatabaseBackendEnqueue:
         )
         mock_client.create_task.side_effect = Exception("API Error")
 
-        with patch.object(backend, "_client", mock_client):
+        with patch.object(backend.broker, "_client", mock_client):
             result = backend.enqueue(simple_task, (2, 3), {})
 
         # Task should still be saved to database
         assert result.id is not None
 
-        # Error should be logged
-        assert "Failed to create Cloud Task" in caplog.text
+        # Error should be logged, with the traceback
+        assert "CloudTasksBroker failed to enqueue task" in caplog.text
+        assert "API Error" in caplog.text
 
 
 class TestCloudTasksDatabaseBackendGetAuthHandler:
