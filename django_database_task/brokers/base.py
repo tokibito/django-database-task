@@ -141,13 +141,16 @@ class PullBroker(TaskBroker):
     the worker can crash without losing the task.
     """
 
-    def receive(self, max_messages=1, wait_seconds=20):
+    def receive(self, queue_name=None, max_messages=1, wait_seconds=20):
         """
         Wait for messages and return them.
 
         Args:
+            queue_name: Django queue to read from, or None for the
+                broker's default. Pass it through resolve_queue().
             max_messages: How many messages to return at most.
             wait_seconds: How long to wait for a message before giving up.
+                Zero polls without waiting.
 
         Returns:
             list of BrokerMessage

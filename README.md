@@ -245,11 +245,45 @@ python manage.py run_database_tasks [options]
 | `--continuous` | Keep polling even when no tasks |
 | `--interval` | Polling interval in seconds (default: 5) |
 | `--max-tasks` | Maximum number of tasks to process (0=unlimited) |
+| `--source` | Where to look for tasks: `auto` (default), `db`, `broker` or `both`. See [Task sources](#task-sources) |
+| `--wait-time` | Seconds to wait for a broker message before looking again (default: 20) |
+| `--max-messages` | Maximum number of broker messages to receive at a time (default: 1) |
 | `--shutdown-timeout` | Maximum seconds to wait for the running task after `SIGTERM`/`SIGINT` before forcing exit (0=wait indefinitely, default: 0) |
 | `--no-graceful-shutdown` | Do not install signal handlers (terminate immediately, even while a task is running) |
 | `--verbosity` | Output level: `0` silent (errors only), `1` normal (default), `2` also print an idle heartbeat dot per poll |
 
 See [Graceful Shutdown](#graceful-shutdown) for details.
+
+#### Task sources
+
+By default the worker polls the database, which is what it has always done.
+When the backend has a [broker](#task-brokers) a worker can receive from — a
+`PullBroker` — the same command also receives from it, without any change to
+how the command is run.
+
+| `--source` | Behaviour |
+|------------|-----------|
+| `auto` | `both` when the backend has a `PullBroker`, `db` otherwise. The default |
+| `db` | Poll the database only. What the command did before 0.4 |
+| `broker` | Receive from the broker only |
+| `both` | Receive from the broker, and fall back to the database when it is empty |
+
+`both` is the useful combination for a broker that cannot hold a task
+indefinitely. A broker with a delivery delay limit — SQS caps it at 15 minutes
+— cannot carry a task deferred further out than that, so those stay in the
+database until they are due, and the database sweep is what picks them up. It
+is also what recovers tasks the broker never accepted, since a broker failure
+during `enqueue()` is logged and swallowed.
+
+While receiving from a broker, `--wait-time` replaces `--interval` as the idle
+wait: the broker's own wait for a message is the pause, so a message wakes the
+worker as soon as it arrives. `SIGTERM` is still honoured — see
+[Graceful Shutdown](#graceful-shutdown).
+
+A message is acknowledged whenever redelivering it would not help: the task
+ran (whether it succeeded or failed), it no longer exists, or another worker
+already holds it. If the worker itself cannot run the task, the message is
+returned to the broker instead, to be delivered again.
 
 #### Output verbosity
 
