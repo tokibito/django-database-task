@@ -5,6 +5,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 
+from tests.tasks import simple_task, special_queue_task
+
 # Skip all tests if google-cloud-tasks is not installed
 pytest.importorskip("google.cloud.tasks_v2")
 
@@ -12,17 +14,16 @@ pytest.importorskip("google.cloud.tasks_v2")
 class TestCloudTasksDatabaseBackendInit:
     """Tests for CloudTasksDatabaseBackend initialization."""
 
-    def test_requires_queue_name(self, monkeypatch):
-        """Should raise error when CLOUD_TASKS_QUEUE is not set."""
+    def test_does_not_require_a_queue_option(self, monkeypatch):
+        """The queue comes from each task, so no queue option is needed."""
         monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-project")
         monkeypatch.setenv("CLOUD_RUN_REGION", "asia-northeast1")
 
         from django_database_task.cloudtasks import CloudTasksDatabaseBackend
 
-        with pytest.raises(ImproperlyConfigured) as exc_info:
-            CloudTasksDatabaseBackend("default", {"OPTIONS": {}})
+        backend = CloudTasksDatabaseBackend("default", {"OPTIONS": {}})
 
-        assert "CLOUD_TASKS_QUEUE is required" in str(exc_info.value)
+        assert backend.project == "my-project"
 
     def test_requires_project(self, monkeypatch):
         """Should raise error when project cannot be detected."""
@@ -33,9 +34,7 @@ class TestCloudTasksDatabaseBackendInit:
         from django_database_task.cloudtasks import CloudTasksDatabaseBackend
 
         with pytest.raises(ImproperlyConfigured) as exc_info:
-            CloudTasksDatabaseBackend(
-                "default", {"OPTIONS": {"CLOUD_TASKS_QUEUE": "default"}}
-            )
+            CloudTasksDatabaseBackend("default", {"OPTIONS": {}})
 
         assert "Could not detect GCP project" in str(exc_info.value)
 
@@ -49,9 +48,7 @@ class TestCloudTasksDatabaseBackendInit:
         from django_database_task.cloudtasks import CloudTasksDatabaseBackend
 
         with pytest.raises(ImproperlyConfigured) as exc_info:
-            CloudTasksDatabaseBackend(
-                "default", {"OPTIONS": {"CLOUD_TASKS_QUEUE": "default"}}
-            )
+            CloudTasksDatabaseBackend("default", {"OPTIONS": {}})
 
         assert "Could not detect GCP location" in str(exc_info.value)
 
@@ -62,13 +59,10 @@ class TestCloudTasksDatabaseBackendInit:
 
         from django_database_task.cloudtasks import CloudTasksDatabaseBackend
 
-        backend = CloudTasksDatabaseBackend(
-            "default", {"OPTIONS": {"CLOUD_TASKS_QUEUE": "my-queue"}}
-        )
+        backend = CloudTasksDatabaseBackend("default", {"OPTIONS": {}})
 
         assert backend.project == "my-project"
         assert backend.location == "asia-northeast1"
-        assert backend.queue_name == "my-queue"
 
     def test_explicit_config_overrides_detection(self, monkeypatch):
         """Should use explicit config over auto-detection."""
@@ -81,7 +75,6 @@ class TestCloudTasksDatabaseBackendInit:
             "default",
             {
                 "OPTIONS": {
-                    "CLOUD_TASKS_QUEUE": "my-queue",
                     "CLOUD_TASKS_PROJECT": "explicit-project",
                     "CLOUD_TASKS_LOCATION": "explicit-region",
                 }
@@ -104,9 +97,7 @@ class TestCloudTasksDatabaseBackendGetTaskHandlerUrl:
 
         from django_database_task.cloudtasks import CloudTasksDatabaseBackend
 
-        return CloudTasksDatabaseBackend(
-            "default", {"OPTIONS": {"CLOUD_TASKS_QUEUE": "default"}}
-        )
+        return CloudTasksDatabaseBackend("default", {"OPTIONS": {}})
 
     def test_uses_explicit_url(self, monkeypatch):
         """Should use TASK_HANDLER_URL when set."""
@@ -119,7 +110,6 @@ class TestCloudTasksDatabaseBackendGetTaskHandlerUrl:
             "default",
             {
                 "OPTIONS": {
-                    "CLOUD_TASKS_QUEUE": "default",
                     "TASK_HANDLER_URL": "https://example.com/tasks/{task_id}/",
                 }
             },
@@ -146,7 +136,6 @@ class TestCloudTasksDatabaseBackendGetTaskHandlerUrl:
             "default",
             {
                 "OPTIONS": {
-                    "CLOUD_TASKS_QUEUE": "default",
                     "TASK_HANDLER_PATH": "/api/v1/tasks/{task_id}/run/",
                 }
             },
@@ -169,19 +158,11 @@ class TestCloudTasksDatabaseBackendEnqueue:
 
         from django_database_task.cloudtasks import CloudTasksDatabaseBackend
 
-        return CloudTasksDatabaseBackend(
-            "default", {"OPTIONS": {"CLOUD_TASKS_QUEUE": "default"}}
-        )
+        return CloudTasksDatabaseBackend("default", {"OPTIONS": {}})
 
     @pytest.mark.django_db
-    def test_enqueue_creates_cloud_task(self, backend, monkeypatch):
+    def test_enqueue_creates_cloud_task(self, backend):
         """Should create Cloud Task after saving to database."""
-        from django.tasks import task
-
-        @task
-        def sample_task(x):
-            return x * 2
-
         # Mock the Cloud Tasks client
         mock_client = MagicMock()
         mock_client.queue_path.return_value = (
@@ -190,7 +171,7 @@ class TestCloudTasksDatabaseBackendEnqueue:
         mock_client.create_task.return_value = MagicMock(name="task-name")
 
         with patch.object(backend, "_client", mock_client):
-            result = backend.enqueue(sample_task, (5,), {})
+            result = backend.enqueue(simple_task, (2, 3), {})
 
         # Verify task was saved to database
         assert result.id is not None
@@ -209,15 +190,36 @@ class TestCloudTasksDatabaseBackendEnqueue:
         assert "fail_on_error=true" in request["task"]["http_request"]["url"]
         assert "allow_retry=true" in request["task"]["http_request"]["url"]
 
+        # The queue comes from the task itself
+        mock_client.queue_path.assert_called_once_with(
+            "my-project", "asia-northeast1", "default"
+        )
+
     @pytest.mark.django_db
-    def test_enqueue_continues_on_cloud_task_error(self, backend, monkeypatch, caplog):
+    def test_enqueue_uses_the_queue_of_the_task(self, monkeypatch):
+        """A task with its own queue is sent to the matching Cloud Tasks queue."""
+        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-project")
+        monkeypatch.setenv("CLOUD_RUN_REGION", "asia-northeast1")
+        monkeypatch.setenv("K_SERVICE", "my-service")
+
+        from django_database_task.cloudtasks import CloudTasksDatabaseBackend
+
+        # An empty QUEUES list lets the backend accept any queue name.
+        backend = CloudTasksDatabaseBackend("default", {"QUEUES": [], "OPTIONS": {}})
+
+        mock_client = MagicMock()
+        mock_client.create_task.return_value = MagicMock(name="task-name")
+
+        with patch.object(backend, "_client", mock_client):
+            backend.enqueue(special_queue_task, (), {})
+
+        mock_client.queue_path.assert_called_once_with(
+            "my-project", "asia-northeast1", "special"
+        )
+
+    @pytest.mark.django_db
+    def test_enqueue_continues_on_cloud_task_error(self, backend, caplog):
         """Should continue even if Cloud Task creation fails."""
-        from django.tasks import task
-
-        @task
-        def sample_task(x):
-            return x * 2
-
         # Mock the Cloud Tasks client to raise an error
         mock_client = MagicMock()
         mock_client.queue_path.return_value = (
@@ -226,7 +228,7 @@ class TestCloudTasksDatabaseBackendEnqueue:
         mock_client.create_task.side_effect = Exception("API Error")
 
         with patch.object(backend, "_client", mock_client):
-            result = backend.enqueue(sample_task, (5,), {})
+            result = backend.enqueue(simple_task, (2, 3), {})
 
         # Task should still be saved to database
         assert result.id is not None
@@ -246,9 +248,7 @@ class TestCloudTasksDatabaseBackendGetAuthHandler:
 
         from django_database_task.cloudtasks import CloudTasksDatabaseBackend
 
-        backend = CloudTasksDatabaseBackend(
-            "default", {"OPTIONS": {"CLOUD_TASKS_QUEUE": "default"}}
-        )
+        backend = CloudTasksDatabaseBackend("default", {"OPTIONS": {}})
 
         assert backend.get_auth_handler() is None
 
@@ -264,7 +264,6 @@ class TestCloudTasksDatabaseBackendGetAuthHandler:
             "default",
             {
                 "OPTIONS": {
-                    "CLOUD_TASKS_QUEUE": "default",
                     "OIDC_SERVICE_ACCOUNT_EMAIL": "sa@project.iam.gserviceaccount.com",
                 }
             },
@@ -286,7 +285,6 @@ class TestCloudTasksDatabaseBackendGetAuthHandler:
             "default",
             {
                 "OPTIONS": {
-                    "CLOUD_TASKS_QUEUE": "default",
                     "OIDC_SERVICE_ACCOUNT_EMAIL": "sa@project.iam.gserviceaccount.com",
                     "OIDC_AUDIENCE": "https://custom-audience.com",
                 }
@@ -308,8 +306,7 @@ class TestCloudTasksDatabaseBackendGetAuthHandlers:
 
         from django_database_task.cloudtasks import CloudTasksDatabaseBackend
 
-        options = {"CLOUD_TASKS_QUEUE": "default"}
-        options.update(extra_options)
+        options = dict(extra_options)
         return CloudTasksDatabaseBackend("default", {"OPTIONS": options})
 
     def test_returns_nothing_without_any_configuration(self, monkeypatch):
