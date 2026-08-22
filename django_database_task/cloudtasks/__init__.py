@@ -54,6 +54,10 @@ def __getattr__(name):
         from .backend import CloudTasksDatabaseBackend
 
         return CloudTasksDatabaseBackend
+    elif name == "CloudTasksBroker":
+        from .broker import CloudTasksBroker
+
+        return CloudTasksBroker
     elif name == "verify_cloud_tasks_oidc":
         from .auth import verify_cloud_tasks_oidc
 
@@ -68,6 +72,8 @@ def __getattr__(name):
 __all__ = [
     # Backend
     "CloudTasksDatabaseBackend",
+    # Broker
+    "CloudTasksBroker",
     # Authentication
     "verify_cloud_tasks_oidc",
     "create_oidc_auth_handler",
