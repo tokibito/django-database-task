@@ -892,6 +892,67 @@ class MyBackend(DatabaseTaskBackend):
 > **Deprecated:** the single-handler `get_auth_handler()` still works in 0.4
 > but is removed in 0.5. Override `get_auth_handlers()` instead.
 
+## Task Brokers
+
+A broker notifies an external service whenever a task is saved, so that
+service can trigger its execution. The database stays the source of truth: a
+broker only ever carries a task id, never the arguments or the state.
+
+Without a broker — the default — tasks are picked up by `run_database_tasks`
+or the [HTTP endpoints](#http-endpoints-optional). With one, the two are still
+available and become the **fallback when the broker is down**: a broker
+failure is logged and the task is left `READY` in the database, so the next
+worker run or endpoint call picks it up.
+
+[Cloud Tasks](#google-cloud-tasks-integration) is the bundled broker. Name it
+by using its backend, which is the same as it has always been:
+
+```python
+TASKS = {
+    "default": {
+        "BACKEND": "django_database_task.cloudtasks.CloudTasksDatabaseBackend",
+    },
+}
+```
+
+### Custom brokers
+
+A project can attach its own broker to the plain backend with the `BROKER`
+option:
+
+```python
+TASKS = {
+    "default": {
+        "BACKEND": "django_database_task.backends.DatabaseTaskBackend",
+        "OPTIONS": {"BROKER": "myproject.brokers.MyBroker"},
+    },
+}
+```
+
+The broker receives the backend and its whole `OPTIONS` dict, so it decides
+which options it reads:
+
+```python
+from django_database_task.brokers import HTTPPushBroker
+
+
+class MyBroker(HTTPPushBroker):
+    def enqueue(self, task_result):
+        url = self.get_handler_url(task_result.id)
+        queue = self.resolve_queue(task_result.task.queue_name)
+        my_service.publish(queue, url)
+
+    def get_auth_handlers(self, endpoint=None):
+        # Verify the credentials my_service sends back to the endpoints.
+        return [verify_my_service]
+```
+
+| Base class | Use for |
+|------------|---------|
+| `TaskBroker` | Anything else |
+| `HTTPPushBroker` | Services that call an HTTP endpoint of your app (Cloud Tasks). Provides `get_handler_url()`, `TASK_HANDLER_URL` and `TASK_HANDLER_PATH` |
+| `PullBroker` | Services a worker polls. Defines `receive()`, `ack()` and `nack()` |
+
 ## Google Cloud Tasks Integration
 
 For serverless environments like Google App Engine or Cloud Run, you can use the Cloud Tasks backend to automatically create Cloud Tasks when tasks are enqueued.
