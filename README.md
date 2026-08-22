@@ -5,7 +5,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/django-database-task.svg)](https://pypi.org/project/django-database-task/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A database-backed task queue backend for Django 6.0's built-in task framework.
+A database-backed task queue backend for Django's built-in task framework.
 
 ## Features
 
@@ -59,15 +59,16 @@ sequenceDiagram
 
 ### Supported Databases
 
-Django 6.0 officially supports the following database versions:
+The minimum database versions are the ones Django itself requires, and Django
+6.1 raised most of them:
 
-| Database | Minimum Version | Notes |
-|----------|-----------------|-------|
-| PostgreSQL | 14+ | Recommended for production. Full `SELECT FOR UPDATE SKIP LOCKED` support. |
-| MySQL | 8.0.11+ | Full `SELECT FOR UPDATE SKIP LOCKED` support. |
-| MariaDB | 10.6+ | Full `SELECT FOR UPDATE SKIP LOCKED` support. |
-| SQLite | 3.31.0+ | Works for development/testing, but no row-level locking. |
-| Oracle | 19c+ | Supported but not tested with this package. |
+| Database | Django 6.0 | Django 6.1 | Notes |
+|----------|------------|------------|-------|
+| PostgreSQL | 14+ | 15+ | Recommended for production. Full `SELECT FOR UPDATE SKIP LOCKED` support. |
+| MySQL | 8.0.11+ | 8.4+ | Full `SELECT FOR UPDATE SKIP LOCKED` support. |
+| MariaDB | 10.6+ | 10.11+ | Full `SELECT FOR UPDATE SKIP LOCKED` support. |
+| SQLite | 3.31.0+ | 3.37.0+ | Works for development/testing, but no row-level locking. |
+| Oracle | 19c+ | 19c+ | Supported but not tested with this package. |
 
 **Note**: `SELECT FOR UPDATE SKIP LOCKED` is used to prevent duplicate task execution in multi-worker environments. SQLite does not support row-level locking, so it is only recommended for development or single-worker deployments.
 
