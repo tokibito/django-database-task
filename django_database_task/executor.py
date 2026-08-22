@@ -105,6 +105,7 @@ def process_tasks(
     backend_name="default",
     max_tasks=0,
     worker_id=None,
+    stop_event=None,
 ):
     """
     Process multiple pending tasks.
@@ -114,6 +115,11 @@ def process_tasks(
         backend_name: Backend name (default: "default").
         max_tasks: Maximum number of tasks to process (0 = unlimited).
         worker_id: Optional worker ID. If not provided, one will be generated.
+        stop_event: Optional object with an ``is_set()`` method (for example a
+            :class:`threading.Event` or a
+            :class:`~django_database_task.GracefulShutdown`). No new task is
+            started once it is set; the task already running is not
+            interrupted.
 
     Returns:
         List of TaskResult objects for all processed tasks.
@@ -124,6 +130,11 @@ def process_tasks(
         >>> print(f"Processed {len(results)} tasks")
         >>> for result in results:
         ...     print(f"  {result.id}: {result.status}")
+
+        # Stop starting new tasks on SIGTERM/SIGINT
+        >>> from django_database_task import GracefulShutdown
+        >>> with GracefulShutdown() as shutdown:
+        ...     results = process_tasks(stop_event=shutdown)
     """
     if worker_id is None:
         worker_id = _generate_worker_id()
@@ -132,6 +143,9 @@ def process_tasks(
     tasks_processed = 0
 
     while True:
+        if stop_event is not None and stop_event.is_set():
+            break
+
         result = process_one_task(
             queue_name=queue_name,
             backend_name=backend_name,

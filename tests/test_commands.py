@@ -1,5 +1,9 @@
 """Tests for management commands."""
 
+import os
+import signal
+import threading
+import time
 from datetime import timedelta
 from io import StringIO
 
@@ -10,10 +14,14 @@ from django.utils import timezone
 
 from django_database_task.models import DatabaseTask
 
+from . import tasks as test_tasks
 from .tasks import (
     failing_task,
     high_priority_task,
     low_priority_task,
+    record_sigterm_handler_task,
+    shutdown_aware_task,
+    shutdown_signal_task,
     simple_task,
     special_queue_task,
 )
@@ -120,6 +128,204 @@ class TestRunDatabaseTasks:
         call_command("run_database_tasks", stdout=out)
 
         assert "No more tasks to process" in out.getvalue()
+
+
+@pytest.mark.django_db
+class TestRunDatabaseTasksGracefulShutdown:
+    def test_running_task_finishes_before_shutdown(self):
+        """A task running when SIGTERM arrives is not interrupted."""
+        signal_result = shutdown_signal_task.enqueue()
+        simple_task.enqueue(1, 2)
+
+        out = StringIO()
+        call_command("run_database_tasks", stdout=out)
+
+        signal_db = DatabaseTask.objects.get(id=signal_result.id)
+        assert signal_db.status == TaskResultStatus.SUCCESSFUL
+        assert signal_db.return_value_json == "sent SIGTERM"
+
+    def test_no_new_task_is_started_after_signal(self):
+        """Queued tasks are left untouched after a shutdown signal."""
+        shutdown_signal_task.enqueue()
+        next_result = simple_task.enqueue(1, 2)
+
+        call_command("run_database_tasks", stdout=StringIO())
+
+        next_db = DatabaseTask.objects.get(id=next_result.id)
+        assert next_db.status == TaskResultStatus.READY
+
+    def test_shutdown_is_reported(self):
+        """The shutdown is reported on stdout."""
+        shutdown_signal_task.enqueue()
+
+        out = StringIO()
+        call_command("run_database_tasks", stdout=out)
+        output = out.getvalue()
+
+        assert "Received SIGTERM" in output
+        assert "Shutdown complete" in output
+        assert "Total tasks processed: 1" in output
+
+    def test_sigint_also_shuts_down_gracefully(self):
+        """SIGINT is handled like SIGTERM, without a KeyboardInterrupt."""
+        signal_result = shutdown_signal_task.enqueue(signal_name="SIGINT")
+        next_result = simple_task.enqueue(1, 2)
+
+        out = StringIO()
+        call_command("run_database_tasks", stdout=out)
+
+        assert (
+            DatabaseTask.objects.get(id=signal_result.id).status
+            == TaskResultStatus.SUCCESSFUL
+        )
+        assert (
+            DatabaseTask.objects.get(id=next_result.id).status == TaskResultStatus.READY
+        )
+        assert "Received SIGINT" in out.getvalue()
+
+    def test_continuous_mode_stops_waiting_on_signal(self):
+        """The polling sleep is interrupted by a shutdown signal."""
+        pid = os.getpid()
+        timer = threading.Timer(0.3, lambda: os.kill(pid, signal.SIGTERM))
+        timer.daemon = True
+        timer.start()
+
+        started = time.monotonic()
+        try:
+            call_command(
+                "run_database_tasks",
+                continuous=True,
+                interval=60,
+                stdout=StringIO(),
+            )
+        finally:
+            timer.cancel()
+        elapsed = time.monotonic() - started
+
+        # Without an interruptible sleep this would block for 60 seconds.
+        assert elapsed < 30
+
+    def test_signal_handlers_are_restored(self):
+        """The original signal handlers are restored after the command."""
+        original_term = signal.getsignal(signal.SIGTERM)
+        original_int = signal.getsignal(signal.SIGINT)
+
+        call_command("run_database_tasks", stdout=StringIO())
+
+        assert signal.getsignal(signal.SIGTERM) is original_term
+        assert signal.getsignal(signal.SIGINT) is original_int
+
+    def test_handler_is_installed_while_task_runs(self):
+        """The graceful shutdown handler is active during task execution."""
+        original_term = signal.getsignal(signal.SIGTERM)
+        test_tasks.recorded_sigterm_handler = None
+
+        record_sigterm_handler_task.enqueue()
+        call_command("run_database_tasks", stdout=StringIO())
+
+        assert test_tasks.recorded_sigterm_handler is not None
+        assert test_tasks.recorded_sigterm_handler is not original_term
+
+    def test_no_graceful_shutdown_option_skips_handlers(self):
+        """--no-graceful-shutdown leaves the signal handlers untouched."""
+        original_term = signal.getsignal(signal.SIGTERM)
+        test_tasks.recorded_sigterm_handler = None
+
+        record_sigterm_handler_task.enqueue()
+        out = StringIO()
+        call_command("run_database_tasks", no_graceful_shutdown=True, stdout=out)
+
+        assert test_tasks.recorded_sigterm_handler is original_term
+        assert "Graceful shutdown: disabled" in out.getvalue()
+
+    def test_shutdown_timeout_is_reported(self):
+        """The configured shutdown timeout is reported on startup."""
+        out = StringIO()
+        call_command("run_database_tasks", shutdown_timeout=30.0, stdout=out)
+
+        assert "Graceful shutdown: enabled (timeout=30.0s)" in out.getvalue()
+
+    def test_task_can_check_shutdown_state(self):
+        """Task functions can stop early with is_shutdown_requested()."""
+        result = shutdown_aware_task.enqueue(iterations=100)
+
+        call_command("run_database_tasks", stdout=StringIO())
+
+        db_task = DatabaseTask.objects.get(id=result.id)
+        assert db_task.status == TaskResultStatus.SUCCESSFUL
+        assert db_task.return_value_json < 100
+
+
+@pytest.mark.django_db
+class TestRunDatabaseTasksVerbosity:
+    def _run_continuous(self, **options):
+        """Run one polling round in continuous mode, then stop it."""
+        pid = os.getpid()
+        timer = threading.Timer(0.3, lambda: os.kill(pid, signal.SIGTERM))
+        timer.daemon = True
+        timer.start()
+
+        out = StringIO()
+        try:
+            call_command(
+                "run_database_tasks",
+                continuous=True,
+                interval=0.05,
+                stdout=out,
+                **options,
+            )
+        finally:
+            timer.cancel()
+        return out.getvalue()
+
+    @staticmethod
+    def _heartbeat_lines(output):
+        """Lines made up only of heartbeat dots."""
+        return [line for line in output.splitlines() if line and set(line) == {"."}]
+
+    def test_idle_dots_are_hidden_by_default(self):
+        """No heartbeat dot is printed at the default verbosity."""
+        output = self._run_continuous()
+
+        assert self._heartbeat_lines(output) == []
+
+    def test_idle_dots_shown_with_verbosity_2(self):
+        """-v 2 prints a heartbeat dot per idle poll."""
+        output = self._run_continuous(verbosity=2)
+
+        assert self._heartbeat_lines(output)
+
+    def test_verbosity_0_silences_informational_output(self):
+        """-v 0 prints nothing for a successful run."""
+        simple_task.enqueue(5, 3)
+
+        out = StringIO()
+        call_command("run_database_tasks", verbosity=0, stdout=out)
+
+        assert out.getvalue() == ""
+        assert (
+            DatabaseTask.objects.filter(status=TaskResultStatus.SUCCESSFUL).count() == 1
+        )
+
+    def test_verbosity_0_still_reports_failures(self):
+        """Task failures are reported even at verbosity 0."""
+        failing_task.enqueue()
+
+        out = StringIO()
+        call_command("run_database_tasks", verbosity=0, stdout=out)
+
+        assert "Task failed" in out.getvalue()
+
+    def test_default_verbosity_reports_task(self):
+        """The per-task block is still printed at the default verbosity."""
+        simple_task.enqueue(5, 3)
+
+        out = StringIO()
+        call_command("run_database_tasks", stdout=out)
+
+        output = out.getvalue()
+        assert "Processing task:" in output
+        assert "Task completed successfully" in output
 
 
 @pytest.mark.django_db

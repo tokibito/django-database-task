@@ -1,5 +1,6 @@
 """Tests for the executor module (public API)."""
 
+import threading
 from datetime import timedelta
 
 import pytest
@@ -8,6 +9,7 @@ from django.tasks.base import TaskResultStatus
 from django.utils import timezone
 
 from django_database_task import (
+    GracefulShutdown,
     fetch_task,
     get_pending_task_count,
     process_one_task,
@@ -264,6 +266,65 @@ class TestProcessTasks:
 
         assert len(results) == 1
         assert results[0].return_value == 3
+
+    def test_process_tasks_stops_on_stop_event(self):
+        """Test that a set stop_event prevents starting new tasks."""
+        for _ in range(3):
+            DatabaseTask.objects.create(
+                task_path="tests.test_executor.sample_task",
+                queue_name="default",
+                priority=0,
+                args_json=[1, 2],
+                kwargs_json={},
+                status=TaskResultStatus.READY,
+                enqueued_at=timezone.now(),
+                backend_name="default",
+            )
+
+        stop_event = threading.Event()
+        stop_event.set()
+
+        results = process_tasks(stop_event=stop_event)
+
+        assert results == []
+        assert DatabaseTask.objects.filter(status=TaskResultStatus.READY).count() == 3
+
+    def test_process_tasks_runs_without_stop_event_set(self):
+        """Test that an unset stop_event does not stop processing."""
+        DatabaseTask.objects.create(
+            task_path="tests.test_executor.sample_task",
+            queue_name="default",
+            priority=0,
+            args_json=[1, 2],
+            kwargs_json={},
+            status=TaskResultStatus.READY,
+            enqueued_at=timezone.now(),
+            backend_name="default",
+        )
+
+        results = process_tasks(stop_event=threading.Event())
+
+        assert len(results) == 1
+
+    def test_process_tasks_accepts_graceful_shutdown(self):
+        """Test that GracefulShutdown can be used as a stop_event."""
+        DatabaseTask.objects.create(
+            task_path="tests.test_executor.sample_task",
+            queue_name="default",
+            priority=0,
+            args_json=[1, 2],
+            kwargs_json={},
+            status=TaskResultStatus.READY,
+            enqueued_at=timezone.now(),
+            backend_name="default",
+        )
+
+        shutdown = GracefulShutdown()
+        shutdown.set()
+
+        results = process_tasks(stop_event=shutdown)
+
+        assert results == []
 
 
 @pytest.mark.django_db

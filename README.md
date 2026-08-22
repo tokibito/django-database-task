@@ -15,6 +15,7 @@ A database-backed task queue backend for Django 6.0's built-in task framework.
 - **Exclusive locking** - Prevents duplicate task execution with `SELECT FOR UPDATE SKIP LOCKED`
 - **Django Admin integration** - View and manage tasks from the admin interface
 - **Async support** - Supports async task functions
+- **Graceful shutdown** - Workers finish the running task before exiting on `SIGTERM`
 - **Google Cloud Tasks integration** - Optional backend for GAE/Cloud Run with auto-detection
 
 ## Architecture
@@ -243,6 +244,24 @@ python manage.py run_database_tasks [options]
 | `--continuous` | Keep polling even when no tasks |
 | `--interval` | Polling interval in seconds (default: 5) |
 | `--max-tasks` | Maximum number of tasks to process (0=unlimited) |
+| `--shutdown-timeout` | Maximum seconds to wait for the running task after `SIGTERM`/`SIGINT` before forcing exit (0=wait indefinitely, default: 0) |
+| `--no-graceful-shutdown` | Do not install signal handlers (terminate immediately, even while a task is running) |
+| `--verbosity` | Output level: `0` silent (errors only), `1` normal (default), `2` also print an idle heartbeat dot per poll |
+
+See [Graceful Shutdown](#graceful-shutdown) for details.
+
+#### Output verbosity
+
+At the default verbosity the worker only prints the startup banner and one
+block per task, so its output stays readable in a log aggregator. Idle polls in
+`--continuous` mode print nothing.
+
+Pass `-v 2` to print a `.` for every poll that found no task - useful when
+watching a worker interactively to confirm it is alive, but it buries real log
+output if left on in production.
+
+Pass `-v 0` to suppress the informational output entirely; task failures and
+errors are still reported.
 
 ### purge_completed_database_tasks
 
@@ -258,6 +277,177 @@ python manage.py purge_completed_database_tasks [options]
 | `--status` | Target statuses, comma-separated (default: "SUCCESSFUL,FAILED") |
 | `--batch-size` | Number of tasks to delete at once (default: 1000) |
 | `--dry-run` | Show count only without deleting |
+
+## Graceful Shutdown
+
+When a worker is redeployed, the orchestrator (Kubernetes, Cloud Run, systemd,
+Docker, supervisord, ...) sends `SIGTERM` and kills the process with `SIGKILL`
+after a grace period. Without any handling, a task that happens to be running
+at that moment is killed halfway through and stays in `RUNNING` status forever.
+
+`run_database_tasks` installs `SIGTERM` and `SIGINT` handlers by default:
+
+1. On the first signal the worker stops fetching new tasks.
+2. The task currently being executed keeps running until it finishes and its
+   result is written to the database.
+3. The worker then exits with status code 0.
+
+While no task is running (the polling sleep in `--continuous` mode), the signal
+is handled immediately - the worker does not wait out the remaining interval.
+
+```console
+$ python manage.py run_database_tasks --continuous
+Worker ID: worker-1-3f2a9c11
+Backend: default
+Continuous mode: interval=5.0s
+Graceful shutdown: enabled (timeout=unlimited)
+
+Processing task: 1e2d... (myapp.tasks.send_report)
+^C
+Received SIGINT: no new tasks will be started. Waiting for the running task to finish (send the signal again to force exit).
+  Task completed successfully
+
+Shutdown complete (no task was interrupted).
+
+Total tasks processed: 1
+```
+
+### Shutdown timeout
+
+By default the worker waits as long as the running task needs. Use
+`--shutdown-timeout` to put an upper bound on it, so the process exits on its
+own terms instead of being `SIGKILL`ed by the platform:
+
+```bash
+python manage.py run_database_tasks --continuous --shutdown-timeout 25
+```
+
+If the task is still running when the timeout expires, the process exits
+immediately with status code 1 and the task stays in `RUNNING` status.
+Set this to a value slightly below the platform's termination grace period,
+and keep the grace period longer than your longest task whenever possible.
+
+Sending the signal a second time (for example pressing Ctrl-C twice) also
+forces an immediate exit.
+
+### Cooperating from inside a task
+
+Long running tasks can check whether a shutdown was requested and stop early,
+so the worker does not have to wait for the whole task to complete:
+
+```python
+from django.tasks import task
+
+from django_database_task import is_shutdown_requested
+
+
+@task
+def import_rows(row_ids):
+    processed = []
+    for row_id in row_ids:
+        if is_shutdown_requested():
+            # Requeue the remaining work and return early
+            import_rows.enqueue([i for i in row_ids if i not in processed])
+            break
+        handle(row_id)
+        processed.append(row_id)
+    return len(processed)
+```
+
+`is_shutdown_requested()` returns `False` when no worker with graceful shutdown
+is active, so tasks using it stay safe to call from a web request, a test, or
+the HTTP endpoints.
+
+### Deployment examples
+
+**Kubernetes** - set `terminationGracePeriodSeconds` longer than the worker's
+shutdown timeout:
+
+```yaml
+spec:
+  terminationGracePeriodSeconds: 60
+  containers:
+    - name: worker
+      command:
+        - python
+        - manage.py
+        - run_database_tasks
+        - --continuous
+        - --shutdown-timeout=50
+```
+
+**systemd** - `TimeoutStopSec` controls how long systemd waits before
+`SIGKILL`:
+
+```ini
+[Service]
+ExecStart=/srv/app/venv/bin/python manage.py run_database_tasks --continuous --shutdown-timeout=50
+KillSignal=SIGTERM
+TimeoutStopSec=60
+Restart=always
+```
+
+**Docker / Docker Compose** - `docker stop` sends `SIGTERM` and waits for
+`--time` (10 seconds by default):
+
+```yaml
+services:
+  worker:
+    command: python manage.py run_database_tasks --continuous --shutdown-timeout=25
+    stop_grace_period: 30s
+```
+
+Make sure the worker is PID 1 or that the signal reaches it (use the exec form
+of `CMD`, or an init such as `tini`, rather than wrapping the command in a
+shell script that swallows signals).
+
+### Tasks left in RUNNING status
+
+If a worker is killed with `SIGKILL` (grace period exceeded, node failure,
+`--no-graceful-shutdown`), the task it was running stays in `RUNNING` status
+because no process is left to update it. Such tasks are not picked up again by
+other workers. They can be found and requeued from the Django admin, or with a
+query like:
+
+```python
+from datetime import timedelta
+
+from django.tasks.base import TaskResultStatus
+from django.utils import timezone
+
+from django_database_task.models import DatabaseTask
+
+stale = DatabaseTask.objects.filter(
+    status=TaskResultStatus.RUNNING,
+    last_attempted_at__lt=timezone.now() - timedelta(hours=1),
+)
+stale.update(status=TaskResultStatus.READY)
+```
+
+Only requeue tasks that are safe to run twice (idempotent).
+
+### Using it in your own worker loop
+
+The shutdown handling is available as a public API, for custom worker loops:
+
+```python
+from django_database_task import GracefulShutdown, process_tasks
+
+with GracefulShutdown(timeout=50) as shutdown:
+    while not shutdown.is_set():
+        results = process_tasks(max_tasks=10, stop_event=shutdown)
+        if not results and shutdown.wait(5):  # interruptible sleep
+            break
+```
+
+| API | Description |
+|-----|-------------|
+| `GracefulShutdown(signals=None, timeout=0, on_signal=None, force_on_repeat=True)` | Context manager that installs the signal handlers |
+| `shutdown.is_set()` | True once a shutdown has been requested |
+| `shutdown.wait(seconds)` | Sleep, returning early (True) when a shutdown is requested |
+| `shutdown.set()` | Request a shutdown programmatically |
+| `process_tasks(..., stop_event=...)` | Stop starting new tasks once the event is set |
+| `is_shutdown_requested()` | True if the active worker was asked to shut down |
 
 ## Programmatic API
 
@@ -294,7 +484,16 @@ if result:
 
 # Retry a failed task
 result = run_task_by_id("...", allow_retry=True)
+
+# Stop starting new tasks when the process receives SIGTERM/SIGINT
+from django_database_task import GracefulShutdown
+
+with GracefulShutdown() as shutdown:
+    results = process_tasks(stop_event=shutdown)
 ```
+
+See [Graceful Shutdown](#graceful-shutdown) for details on `stop_event` and
+`GracefulShutdown`.
 
 ## HTTP Endpoints (Optional)
 
