@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import traceback
+import warnings
+from functools import cached_property
 from importlib import import_module
 from inspect import iscoroutinefunction
 
@@ -22,11 +24,18 @@ class DatabaseTaskBackend(BaseTaskBackend):
     supports_get_result = True
     supports_priority = True
 
+    # Set on an instance once its deprecated get_auth_handler() override has
+    # been reported, so the warning is emitted once per backend.
+    _legacy_auth_handler_warned = False
+
     def get_auth_handler(self):
         """
         Get the authentication handler for task execution endpoints.
 
-        Subclasses can override this to provide custom authentication.
+        .. deprecated:: 0.4
+            Override get_auth_handlers() instead. This method keeps working
+            in 0.4 and is removed in 0.5.
+
         The handler should be a callable that takes a request and returns:
         - None if authentication succeeds
         - A JsonResponse with error details if authentication fails
@@ -35,6 +44,89 @@ class DatabaseTaskBackend(BaseTaskBackend):
             Callable or None
         """
         return None
+
+    # Marks the implementation above as the default one, so an override in a
+    # subclass can be told apart from it.
+    get_auth_handler._is_default_auth_handler = True
+
+    def get_auth_handlers(self, endpoint=None):
+        """
+        Get the authentication handlers for the task HTTP endpoints.
+
+        A request is accepted as soon as one handler accepts it, so a backend
+        can let both the service that calls the endpoints (Cloud Tasks, for
+        example) and an external cron job in, each with its own credentials.
+
+        Each handler is a callable that takes a request and returns:
+        - None if authentication succeeds
+        - A JsonResponse with error details if authentication fails
+
+        An empty list means the endpoints are not authenticated.
+
+        Args:
+            endpoint: Name of the endpoint being called ("run", "run_one",
+                "status", "execute" or "purge"), or None to get every handler
+                regardless of the endpoint it applies to.
+
+        Returns:
+            list of callables
+        """
+        handlers = list(self.get_broker_auth_handlers(endpoint))
+        handlers.extend(self.get_configured_auth_handlers(endpoint))
+        return handlers
+
+    def get_broker_auth_handlers(self, endpoint=None):
+        """
+        Get the handlers that authenticate the service calling the endpoints.
+
+        Subclasses that integrate with a task broker override this to verify
+        the broker's own credentials. The default implementation adapts a
+        deprecated get_auth_handler() override.
+
+        Returns:
+            list of callables
+        """
+        handler = self._get_legacy_auth_handler()
+        return [handler] if handler is not None else []
+
+    def get_configured_auth_handlers(self, endpoint=None):
+        """
+        Get the handlers built from the AUTH_HANDLERS backend option.
+
+        Returns:
+            list of callables
+        """
+        return [
+            handler
+            for handler, endpoints in self._auth_handler_specs
+            if endpoint is None or endpoints is None or endpoint in endpoints
+        ]
+
+    @cached_property
+    def _auth_handler_specs(self):
+        """Load AUTH_HANDLERS once per backend instance."""
+        from .auth import load_auth_handlers
+
+        return load_auth_handlers(
+            self.options.get("AUTH_HANDLERS"),
+            self.options.get("AUTH_HANDLER_OPTIONS"),
+        )
+
+    def _get_legacy_auth_handler(self):
+        """Call a deprecated get_auth_handler() override, if there is one."""
+        implementation = type(self).get_auth_handler
+        if not getattr(implementation, "_is_default_auth_handler", False):
+            if not self._legacy_auth_handler_warned:
+                warnings.warn(
+                    f"{type(self).__name__}.get_auth_handler() is deprecated and "
+                    "will be removed in django-database-task 0.5. Override "
+                    "get_auth_handlers() or get_broker_auth_handlers() instead.",
+                    DeprecationWarning,
+                    stacklevel=3,
+                )
+                self._legacy_auth_handler_warned = True
+
+        return self.get_auth_handler()
 
     def enqueue(self, task, args, kwargs):
         """Enqueue a task to the database.

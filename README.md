@@ -778,6 +778,120 @@ urlpatterns = [
 ]
 ```
 
+### Backend authentication handlers
+
+Instead of wrapping each view, the backend can supply authentication handlers
+that every endpoint applies automatically. Configure them with the
+`AUTH_HANDLERS` option:
+
+```python
+# settings.py
+TASKS = {
+    "default": {
+        "BACKEND": "django_database_task.backends.DatabaseTaskBackend",
+        "OPTIONS": {
+            "AUTH_HANDLERS": [
+                "django_database_task.auth.SharedSecretAuth",
+            ],
+            "AUTH_HANDLER_OPTIONS": {
+                # Read the token from settings.TASK_API_TOKEN
+                "TOKEN_SETTING": "TASK_API_TOKEN",
+            },
+        },
+    },
+}
+```
+
+```bash
+curl -X POST https://example.com/tasks/run/ \
+  -H "Authorization: Bearer $TASK_API_TOKEN"
+```
+
+**A request is accepted as soon as one handler accepts it.** This lets the
+service that calls the endpoints (Cloud Tasks, for example) and an external
+cron job authenticate differently on the same endpoint:
+
+```python
+TASKS = {
+    "default": {
+        "BACKEND": "django_database_task.cloudtasks.CloudTasksDatabaseBackend",
+        "OPTIONS": {
+            # Cloud Tasks calls /tasks/execute/<id>/ with an OIDC token
+            "OIDC_SERVICE_ACCOUNT_EMAIL": "sa@my-project.iam.gserviceaccount.com",
+            # An external cron job calls /tasks/run/ with a shared secret
+            "AUTH_HANDLERS": [
+                {
+                    "HANDLER": "django_database_task.auth.SharedSecretAuth",
+                    "OPTIONS": {"TOKEN_SETTING": "TASK_CRON_TOKEN"},
+                    "ENDPOINTS": ["run", "run_one", "status", "purge"],
+                },
+            ],
+        },
+    },
+}
+```
+
+`ENDPOINTS` limits a handler to some of the endpoints; omit it to apply the
+handler everywhere. The valid names are `run`, `run_one`, `status`, `execute`
+and `purge`.
+
+#### Bundled handlers
+
+| Handler | Description |
+|---------|-------------|
+| `SharedSecretAuth` | Compares a token in a header. Options: `TOKEN` / `TOKEN_SETTING` / `TOKEN_ENV`, `HEADER` (default `Authorization`), `SCHEME` (default `Bearer`) |
+| `HMACAuth` | Verifies a signature with a timestamp, rejecting replays. Options: `SECRET` / `SECRET_SETTING` / `SECRET_ENV`, `HEADER` (default `X-Task-Signature`), `TIMESTAMP_HEADER` (default `X-Task-Timestamp`), `MAX_AGE` (default `300`), `ALGORITHM` (default `sha256`) |
+| `StaffOnlyAuth` | Accepts a logged in staff user. Requires `AuthenticationMiddleware` |
+
+Prefer `TOKEN_SETTING` / `TOKEN_ENV` over writing the secret into `OPTIONS`.
+
+Callers sign a request for `HMACAuth` with `build_signature()`:
+
+```python
+import time
+import requests
+from django_database_task.auth import build_signature
+
+timestamp = str(int(time.time()))
+body = b'{"max_tasks": 10}'
+signature = build_signature(SECRET, timestamp, "POST", "/tasks/run/", body)
+
+requests.post(
+    "https://example.com/tasks/run/",
+    data=body,
+    headers={
+        "Content-Type": "application/json",
+        "X-Task-Signature": signature,
+        "X-Task-Timestamp": timestamp,
+    },
+)
+```
+
+#### Custom handlers
+
+A handler is any callable that takes a request and returns `None` to accept it
+or a response to reject it. Put one in `AUTH_HANDLERS`, or override
+`get_auth_handlers()` on a backend subclass:
+
+```python
+from django.http import JsonResponse
+from django_database_task.backends import DatabaseTaskBackend
+
+
+def allow_internal_network(request):
+    if request.META.get("REMOTE_ADDR", "").startswith("10."):
+        return None
+    return JsonResponse({"error": "Forbidden"}, status=403)
+
+
+class MyBackend(DatabaseTaskBackend):
+    def get_auth_handlers(self, endpoint=None):
+        return [allow_internal_network, *super().get_auth_handlers(endpoint)]
+```
+
+> **Deprecated:** the single-handler `get_auth_handler()` still works in 0.4
+> but is removed in 0.5. Override `get_auth_handlers()` instead.
+
 ## Google Cloud Tasks Integration
 
 For serverless environments like Google App Engine or Cloud Run, you can use the Cloud Tasks backend to automatically create Cloud Tasks when tasks are enqueued.
@@ -898,7 +1012,9 @@ TASKS = {
 
 ### OIDC Authentication
 
-When `OIDC_SERVICE_ACCOUNT_EMAIL` is configured, Cloud Tasks will send OIDC tokens with each request. The backend automatically verifies these tokens on the `/tasks/execute/` and `/tasks/purge/` endpoints.
+When `OIDC_SERVICE_ACCOUNT_EMAIL` is configured, Cloud Tasks will send OIDC tokens with each request. The backend automatically verifies these tokens on every task endpoint.
+
+To let another caller — an external cron job, for example — reach the endpoints with its own credentials, add handlers with the `AUTH_HANDLERS` option. A request is accepted as soon as one handler accepts it. See [Backend authentication handlers](#backend-authentication-handlers).
 
 #### Required IAM Roles
 

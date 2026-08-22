@@ -96,6 +96,21 @@ class CloudTasksDatabaseBackend(DatabaseTaskBackend):
             self._client = tasks_v2.CloudTasksClient()
         return self._client
 
+    def get_broker_auth_handlers(self, endpoint=None):
+        """
+        Get the handlers that verify OIDC tokens sent by Cloud Tasks.
+
+        Overridden so the OIDC handler is combined with any handler
+        configured through the AUTH_HANDLERS option instead of replacing it.
+        That lets an external cron job keep calling the endpoints with its
+        own credentials while Cloud Tasks uses OIDC.
+
+        Returns:
+            list of callables
+        """
+        handler = self.get_auth_handler()
+        return [handler] if handler is not None else []
+
     def get_auth_handler(self):
         """
         Get the OIDC authentication handler for task execution endpoints.
