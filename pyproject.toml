@@ -50,7 +50,7 @@ cloudtasks = [
 dev = [
     "pytest>=7.0",
     "pytest-django>=4.5",
-    "ruff>=0.8",
+    "ruff>=0.16,<0.17",
 ]
 
 [project.urls]
@@ -76,6 +76,10 @@ addopts = "-v"
 [tool.ruff]
 target-version = "py312"
 line-length = 88
+# Ruff formats Python code blocks inside Markdown. The documentation
+# snippets are deliberately compact (no PEP 8 blank-line padding around
+# decorated examples), so keep the docs out of scope.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = [
