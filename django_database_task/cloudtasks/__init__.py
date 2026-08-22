@@ -12,24 +12,22 @@ Minimal configuration (GAE/Cloud Run with auto-detection):
     TASKS = {
         "default": {
             "BACKEND": "django_database_task.cloudtasks.CloudTasksDatabaseBackend",
-            "OPTIONS": {
-                "CLOUD_TASKS_QUEUE": "default",
-            },
         },
     }
+
+    The Cloud Tasks queue comes from each task's queue_name attribute.
 
 With OIDC authentication (automatic when OIDC_SERVICE_ACCOUNT_EMAIL is set):
     TASKS = {
         "default": {
             "BACKEND": "django_database_task.cloudtasks.CloudTasksDatabaseBackend",
             "OPTIONS": {
-                "CLOUD_TASKS_QUEUE": "default",
                 "OIDC_SERVICE_ACCOUNT_EMAIL": "my-sa@project.iam.gserviceaccount.com",
             },
         },
     }
 
-    The backend automatically verifies OIDC tokens on the /tasks/execute/ endpoint.
+    The backend automatically verifies OIDC tokens on every task endpoint.
 
 For more information, see the documentation.
 """
