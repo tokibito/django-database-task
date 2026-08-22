@@ -3,11 +3,13 @@
 import json
 
 import pytest
+from django.http import JsonResponse
 from django.tasks.base import TaskResultStatus
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
+from django_database_task.backends import DatabaseTaskBackend
 from django_database_task.models import DatabaseTask
 
 
@@ -853,3 +855,169 @@ class TestPurgeCompletedTasksView:
 
         assert response.status_code == 400
         assert "No valid statuses" in response.json()["error"]
+
+
+# All endpoints that must consult the backend's authentication handler,
+# as (url name, HTTP method, reverse() args).
+AUTHENTICATED_ENDPOINTS = [
+    ("run_tasks", "post", []),
+    ("run_one_task", "post", []),
+    ("task_status", "get", []),
+    ("execute_task", "post", ["3f2a9c11-0000-4000-8000-000000000000"]),
+    ("purge_completed_tasks", "get", []),
+    ("purge_completed_tasks", "post", []),
+]
+
+
+class AuthHandlerRecorder:
+    """An authentication handler that records the requests it saw."""
+
+    def __init__(self, response=None):
+        self.requests = []
+        self.response = response
+
+    def __call__(self, request):
+        self.requests.append(request)
+        return self.response
+
+
+@pytest.fixture
+def rejecting_handler(monkeypatch):
+    """Make the default backend reject every request with a 401."""
+    recorder = AuthHandlerRecorder(JsonResponse({"error": "Unauthorized"}, status=401))
+    monkeypatch.setattr(DatabaseTaskBackend, "get_auth_handler", lambda self: recorder)
+    return recorder
+
+
+@pytest.fixture
+def accepting_handler(monkeypatch):
+    """Make the default backend accept every request."""
+    recorder = AuthHandlerRecorder(None)
+    monkeypatch.setattr(DatabaseTaskBackend, "get_auth_handler", lambda self: recorder)
+    return recorder
+
+
+def _call(client, url_name, method, args):
+    url = reverse(f"django_database_task:{url_name}", args=args)
+    return getattr(client, method)(url, data="", content_type="application/json")
+
+
+@pytest.mark.django_db
+class TestBackendAuthentication:
+    """Tests for the authentication handler the backend provides."""
+
+    def test_base_backend_provides_no_handler(self):
+        """The base backend opts out of authentication."""
+        assert (
+            DatabaseTaskBackend(alias="default", params={}).get_auth_handler() is None
+        )
+
+    @pytest.mark.parametrize("url_name,method,args", AUTHENTICATED_ENDPOINTS)
+    def test_rejected_request_is_blocked(
+        self, client, rejecting_handler, url_name, method, args
+    ):
+        """Every endpoint returns the handler's response and stops there."""
+        response = _call(client, url_name, method, args)
+
+        assert response.status_code == 401
+        assert response.json() == {"error": "Unauthorized"}
+        assert len(rejecting_handler.requests) == 1
+
+    @pytest.mark.parametrize("url_name,method,args", AUTHENTICATED_ENDPOINTS)
+    def test_accepted_request_reaches_the_view(
+        self, client, accepting_handler, url_name, method, args
+    ):
+        """A handler returning None lets the request through."""
+        response = _call(client, url_name, method, args)
+
+        assert len(accepting_handler.requests) == 1
+        assert response.status_code != 401
+
+    @pytest.mark.parametrize("url_name,method,args", AUTHENTICATED_ENDPOINTS)
+    def test_endpoints_work_without_a_handler(self, client, url_name, method, args):
+        """Backends without a handler are unaffected."""
+        response = _call(client, url_name, method, args)
+
+        assert response.status_code != 401
+
+    def test_rejected_request_does_not_run_tasks(self, client, rejecting_handler):
+        """A blocked run request leaves the queued task alone."""
+        task = DatabaseTask.objects.create(
+            task_path="tests.test_executor.sample_task",
+            queue_name="default",
+            priority=0,
+            args_json=[],
+            kwargs_json={},
+            status=TaskResultStatus.READY,
+            enqueued_at=timezone.now(),
+            backend_name="default",
+        )
+
+        response = client.post(reverse("django_database_task:run_tasks"))
+
+        assert response.status_code == 401
+        task.refresh_from_db()
+        assert task.status == TaskResultStatus.READY
+
+    def test_rejected_request_does_not_purge_tasks(self, client, rejecting_handler):
+        """A blocked purge request deletes nothing."""
+        DatabaseTask.objects.create(
+            task_path="tests.test_executor.sample_task",
+            queue_name="default",
+            priority=0,
+            args_json=[],
+            kwargs_json={},
+            status=TaskResultStatus.SUCCESSFUL,
+            enqueued_at=timezone.now(),
+            finished_at=timezone.now(),
+            backend_name="default",
+        )
+
+        response = client.post(reverse("django_database_task:purge_completed_tasks"))
+
+        assert response.status_code == 401
+        assert DatabaseTask.objects.count() == 1
+
+    def test_unusable_backend_name_does_not_skip_authentication(
+        self, client, rejecting_handler
+    ):
+        """An unresolvable backend is rejected instead of running unauthenticated."""
+        response = client.get(
+            reverse("django_database_task:task_status"),
+            {"backend_name": "does-not-exist"},
+        )
+
+        assert response.status_code == 400
+        assert response.json() == {"error": "Invalid backend name"}
+        assert rejecting_handler.requests == []
+
+    def test_backend_name_from_the_request_body_is_used(self, client, monkeypatch):
+        """Views that read backend_name from a JSON body authenticate with it."""
+        seen = []
+        monkeypatch.setattr(
+            DatabaseTaskBackend,
+            "get_auth_handler",
+            lambda self: lambda request: seen.append(request) or None,
+        )
+
+        response = client.post(
+            reverse("django_database_task:run_tasks"),
+            data=json.dumps({"backend_name": "default"}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        assert len(seen) == 1
+
+    def test_malformed_body_still_reports_a_bad_request(
+        self, client, accepting_handler
+    ):
+        """A broken JSON body is reported by the view, not the auth check."""
+        response = client.post(
+            reverse("django_database_task:run_tasks"),
+            data="{not json",
+            content_type="application/json",
+        )
+
+        assert response.status_code == 400
+        assert "Invalid JSON" in response.json()["error"]

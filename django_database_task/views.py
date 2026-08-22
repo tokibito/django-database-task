@@ -39,13 +39,78 @@ def get_backend(backend_name="default"):
     """Get a task backend by name."""
     if backend_name == "default":
         return default_task_backend
-    from django.tasks import tasks
+    from django.tasks import task_backends
 
-    return tasks[backend_name]
+    return task_backends[backend_name]
+
+
+class BackendAuthMixin:
+    """
+    Apply the authentication handler the task backend provides, if any.
+
+    The backend decides how requests are authenticated by returning a
+    handler from get_auth_handler() (see
+    DatabaseTaskBackend.get_auth_handler). A handler takes the request and
+    returns None to accept it, or a response to reject it.
+
+    The check runs in dispatch(), before the method is dispatched, so every
+    endpoint and every HTTP method is covered. Backends that provide no
+    handler are unaffected.
+    """
+
+    def get_backend_name(self, request, *args, **kwargs):
+        """
+        Name of the backend that authenticates this request.
+
+        Views that read backend_name from a request body override this.
+        """
+        return request.GET.get("backend_name", "default")
+
+    def get_auth_error_response(self, request, *args, **kwargs):
+        """Return a response if authentication fails, None if it passes."""
+        backend_name = self.get_backend_name(request, *args, **kwargs)
+        try:
+            backend = get_backend(backend_name)
+        except Exception:
+            # An unusable backend name must not skip authentication.
+            return JsonResponse({"error": "Invalid backend name"}, status=400)
+
+        get_auth_handler = getattr(backend, "get_auth_handler", None)
+        if get_auth_handler is None:
+            return None
+
+        auth_handler = get_auth_handler()
+        if auth_handler is None:
+            return None
+
+        return auth_handler(request)
+
+    def dispatch(self, request, *args, **kwargs):
+        error_response = self.get_auth_error_response(request, *args, **kwargs)
+        if error_response:
+            return error_response
+        return super().dispatch(request, *args, **kwargs)
+
+
+class JSONBodyBackendAuthMixin(BackendAuthMixin):
+    """BackendAuthMixin for views that read backend_name from a JSON body."""
+
+    def get_backend_name(self, request, *args, **kwargs):
+        try:
+            data = json.loads(request.body) if request.body else {}
+        except json.JSONDecodeError:
+            # Let the view report the malformed body.
+            return "default"
+
+        if not isinstance(data, dict):
+            return "default"
+
+        backend_name = data.get("backend_name", "default")
+        return backend_name if isinstance(backend_name, str) else "default"
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class RunTasksView(View):
+class RunTasksView(JSONBodyBackendAuthMixin, View):
     """
     Process pending tasks via HTTP POST.
 
@@ -132,7 +197,7 @@ class RunTasksView(View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class RunOneTaskView(View):
+class RunOneTaskView(JSONBodyBackendAuthMixin, View):
     """
     Process a single pending task via HTTP POST.
 
@@ -196,7 +261,7 @@ class RunOneTaskView(View):
         )
 
 
-class TaskStatusView(View):
+class TaskStatusView(BackendAuthMixin, View):
     """
     Get pending task count via HTTP GET.
 
@@ -225,7 +290,7 @@ class TaskStatusView(View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class ExecuteTaskView(View):
+class ExecuteTaskView(BackendAuthMixin, View):
     """
     Execute a specific task by ID via HTTP POST.
 
@@ -316,17 +381,6 @@ class ExecuteTaskView(View):
     http_method_names = ["post"]
 
     def post(self, request, task_id):
-        backend_name = request.GET.get("backend_name", "default")
-
-        # Get backend and check for auth handler
-        backend = get_backend(backend_name)
-        if hasattr(backend, "get_auth_handler"):
-            auth_handler = backend.get_auth_handler()
-            if auth_handler:
-                error_response = auth_handler(request)
-                if error_response:
-                    return error_response
-
         fail_on_error = request.GET.get("fail_on_error", "").lower() == "true"
         allow_retry = request.GET.get("allow_retry", "").lower() == "true"
 
@@ -364,7 +418,7 @@ class ExecuteTaskView(View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class PurgeCompletedTasksView(View):
+class PurgeCompletedTasksView(BackendAuthMixin, View):
     """
     Delete completed tasks via HTTP GET or POST.
 
@@ -452,17 +506,6 @@ class PurgeCompletedTasksView(View):
 
     def _purge(self, request):
         """Common purge logic for GET and POST."""
-        backend_name = request.GET.get("backend_name", "default")
-
-        # Get backend and check for auth handler
-        backend = get_backend(backend_name)
-        if hasattr(backend, "get_auth_handler"):
-            auth_handler = backend.get_auth_handler()
-            if auth_handler:
-                error_response = auth_handler(request)
-                if error_response:
-                    return error_response
-
         # Get parameters
         params, error = self._get_params(request)
         if error:
