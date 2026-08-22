@@ -1021,3 +1021,190 @@ class TestBackendAuthentication:
 
         assert response.status_code == 400
         assert "Invalid JSON" in response.json()["error"]
+
+
+@pytest.fixture
+def use_backend(monkeypatch):
+    """Make the views authenticate against a backend built for the test."""
+
+    def install(backend):
+        monkeypatch.setattr(
+            "django_database_task.views.get_backend", lambda name="default": backend
+        )
+        return backend
+
+    return install
+
+
+def _backend_with_handlers(entries, options=None):
+    """Build a default backend whose AUTH_HANDLERS are the given entries."""
+    backend_options = {"AUTH_HANDLERS": entries}
+    if options:
+        backend_options["AUTH_HANDLER_OPTIONS"] = options
+    return DatabaseTaskBackend(alias="default", params={"OPTIONS": backend_options})
+
+
+@pytest.mark.django_db
+class TestAuthHandlerComposition:
+    """Tests for combining several authentication handlers."""
+
+    def test_base_backend_provides_no_handlers(self):
+        """The base backend opts out of authentication."""
+        backend = DatabaseTaskBackend(alias="default", params={})
+
+        assert backend.get_auth_handlers() == []
+
+    def test_one_accepting_handler_lets_the_request_through(self, client, use_backend):
+        """A rejection is ignored once another handler accepts."""
+        rejecting = AuthHandlerRecorder(JsonResponse({"error": "no"}, status=401))
+        accepting = AuthHandlerRecorder(None)
+        use_backend(_backend_with_handlers([rejecting, accepting]))
+
+        response = client.get(reverse("django_database_task:task_status"))
+
+        assert response.status_code == 200
+        assert len(rejecting.requests) == 1
+        assert len(accepting.requests) == 1
+
+    def test_handlers_after_the_accepting_one_are_not_called(self, client, use_backend):
+        """Evaluation stops at the first handler that accepts."""
+        accepting = AuthHandlerRecorder(None)
+        unused = AuthHandlerRecorder(JsonResponse({"error": "no"}, status=401))
+        use_backend(_backend_with_handlers([accepting, unused]))
+
+        response = client.get(reverse("django_database_task:task_status"))
+
+        assert response.status_code == 200
+        assert unused.requests == []
+
+    def test_the_first_rejection_is_returned(self, client, use_backend):
+        """When every handler rejects, the first response is the answer."""
+        first = AuthHandlerRecorder(JsonResponse({"error": "first"}, status=401))
+        second = AuthHandlerRecorder(JsonResponse({"error": "second"}, status=403))
+        use_backend(_backend_with_handlers([first, second]))
+
+        response = client.get(reverse("django_database_task:task_status"))
+
+        assert response.status_code == 401
+        assert response.json() == {"error": "first"}
+        assert len(second.requests) == 1
+
+    def test_the_broker_handler_runs_before_the_configured_ones(
+        self, client, use_backend, monkeypatch
+    ):
+        """A broker handler is tried first, so its rejection is reported."""
+        broker = AuthHandlerRecorder(JsonResponse({"error": "broker"}, status=401))
+        configured = AuthHandlerRecorder(
+            JsonResponse({"error": "configured"}, status=401)
+        )
+        backend = _backend_with_handlers([configured])
+        monkeypatch.setattr(
+            type(backend),
+            "get_broker_auth_handlers",
+            lambda self, endpoint=None: [broker],
+        )
+        use_backend(backend)
+
+        response = client.get(reverse("django_database_task:task_status"))
+
+        assert response.json() == {"error": "broker"}
+
+    def test_a_handler_scoped_to_other_endpoints_is_skipped(self, client, use_backend):
+        """ENDPOINTS limits a handler to the endpoints it names."""
+        recorder = AuthHandlerRecorder(JsonResponse({"error": "no"}, status=401))
+        use_backend(
+            _backend_with_handlers([{"HANDLER": recorder, "ENDPOINTS": ["purge"]}])
+        )
+
+        response = client.get(reverse("django_database_task:task_status"))
+
+        assert response.status_code == 200
+        assert recorder.requests == []
+
+    def test_a_handler_scoped_to_this_endpoint_is_applied(self, client, use_backend):
+        """The same handler still guards the endpoint it names."""
+        recorder = AuthHandlerRecorder(JsonResponse({"error": "no"}, status=401))
+        use_backend(
+            _backend_with_handlers([{"HANDLER": recorder, "ENDPOINTS": ["purge"]}])
+        )
+
+        response = client.get(reverse("django_database_task:purge_completed_tasks"))
+
+        assert response.status_code == 401
+        assert len(recorder.requests) == 1
+
+    def test_a_shared_secret_lets_an_external_caller_in(self, client, use_backend):
+        """The documented cron setup works end to end."""
+        use_backend(
+            _backend_with_handlers(
+                ["django_database_task.auth.SharedSecretAuth"], {"TOKEN": "s3cret"}
+            )
+        )
+        url = reverse("django_database_task:task_status")
+
+        assert client.get(url).status_code == 401
+        assert client.get(url, HTTP_AUTHORIZATION="Bearer s3cret").status_code == 200
+
+    def test_a_backend_with_only_the_deprecated_api_is_supported(
+        self, client, use_backend
+    ):
+        """A third party backend that predates get_auth_handlers() still works."""
+
+        class LegacyBackend:
+            def __init__(self):
+                self.recorder = AuthHandlerRecorder(
+                    JsonResponse({"error": "legacy"}, status=401)
+                )
+
+            def get_auth_handler(self):
+                return self.recorder
+
+        backend = use_backend(LegacyBackend())
+
+        response = client.get(reverse("django_database_task:task_status"))
+
+        assert response.status_code == 401
+        assert len(backend.recorder.requests) == 1
+
+
+class TestDeprecatedAuthHandler:
+    """Tests for the deprecated single-handler API."""
+
+    def test_an_override_is_still_used_and_warns(self):
+        """A subclass overriding get_auth_handler() keeps working."""
+        recorder = AuthHandlerRecorder(None)
+
+        class CustomBackend(DatabaseTaskBackend):
+            def get_auth_handler(self):
+                return recorder
+
+        backend = CustomBackend(alias="default", params={})
+
+        with pytest.warns(DeprecationWarning, match="get_auth_handler"):
+            handlers = backend.get_auth_handlers()
+
+        assert handlers == [recorder]
+
+    def test_the_warning_is_emitted_once_per_backend(self, recwarn):
+        """The deprecation notice does not repeat on every request."""
+
+        class CustomBackend(DatabaseTaskBackend):
+            def get_auth_handler(self):
+                return None
+
+        backend = CustomBackend(alias="default", params={})
+        backend.get_auth_handlers()
+        backend.get_auth_handlers()
+
+        assert (
+            len([w for w in recwarn.list if issubclass(w.category, DeprecationWarning)])
+            == 1
+        )
+
+    def test_the_default_implementation_does_not_warn(self, recwarn):
+        """Backends that never touched the old API stay quiet."""
+        DatabaseTaskBackend(alias="default", params={}).get_auth_handlers()
+
+        assert [
+            w for w in recwarn.list if issubclass(w.category, DeprecationWarning)
+        ] == []

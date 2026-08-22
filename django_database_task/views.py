@@ -46,17 +46,27 @@ def get_backend(backend_name="default"):
 
 class BackendAuthMixin:
     """
-    Apply the authentication handler the task backend provides, if any.
+    Apply the authentication handlers the task backend provides, if any.
 
-    The backend decides how requests are authenticated by returning a
-    handler from get_auth_handler() (see
-    DatabaseTaskBackend.get_auth_handler). A handler takes the request and
-    returns None to accept it, or a response to reject it.
+    The backend decides how requests are authenticated by returning handlers
+    from get_auth_handlers() (see DatabaseTaskBackend.get_auth_handlers).
+    Each handler takes the request and returns None to accept it, or a
+    response to reject it.
+
+    The handlers are tried in order and the request is accepted as soon as
+    one of them accepts it, so a backend can let both the service that calls
+    the endpoints (Cloud Tasks, for example) and an external cron job in,
+    each with its own credentials. When every handler rejects the request,
+    the first rejection is returned.
 
     The check runs in dispatch(), before the method is dispatched, so every
     endpoint and every HTTP method is covered. Backends that provide no
     handler are unaffected.
     """
+
+    # Endpoint name passed to get_auth_handlers(), so a handler can be
+    # configured for a subset of the endpoints. See auth.AUTH_ENDPOINTS.
+    auth_endpoint = None
 
     def get_backend_name(self, request, *args, **kwargs):
         """
@@ -65,6 +75,21 @@ class BackendAuthMixin:
         Views that read backend_name from a request body override this.
         """
         return request.GET.get("backend_name", "default")
+
+    def get_auth_handlers(self, backend):
+        """Return the handlers that may authenticate this request."""
+        get_auth_handlers = getattr(backend, "get_auth_handlers", None)
+        if get_auth_handlers is not None:
+            return list(get_auth_handlers(self.auth_endpoint) or [])
+
+        # A third party backend that only implements the API deprecated
+        # in 0.4.
+        get_auth_handler = getattr(backend, "get_auth_handler", None)
+        if get_auth_handler is None:
+            return []
+
+        auth_handler = get_auth_handler()
+        return [auth_handler] if auth_handler is not None else []
 
     def get_auth_error_response(self, request, *args, **kwargs):
         """Return a response if authentication fails, None if it passes."""
@@ -75,15 +100,15 @@ class BackendAuthMixin:
             # An unusable backend name must not skip authentication.
             return JsonResponse({"error": "Invalid backend name"}, status=400)
 
-        get_auth_handler = getattr(backend, "get_auth_handler", None)
-        if get_auth_handler is None:
-            return None
+        first_error = None
+        for auth_handler in self.get_auth_handlers(backend):
+            error_response = auth_handler(request)
+            if error_response is None:
+                return None
+            if first_error is None:
+                first_error = error_response
 
-        auth_handler = get_auth_handler()
-        if auth_handler is None:
-            return None
-
-        return auth_handler(request)
+        return first_error
 
     def dispatch(self, request, *args, **kwargs):
         error_response = self.get_auth_error_response(request, *args, **kwargs)
@@ -147,6 +172,7 @@ class RunTasksView(JSONBodyBackendAuthMixin, View):
             ]
     """
 
+    auth_endpoint = "run"
     http_method_names = ["post"]
 
     def post(self, request):
@@ -222,6 +248,7 @@ class RunOneTaskView(JSONBodyBackendAuthMixin, View):
         }
     """
 
+    auth_endpoint = "run_one"
     http_method_names = ["post"]
 
     def post(self, request):
@@ -275,6 +302,7 @@ class TaskStatusView(BackendAuthMixin, View):
         }
     """
 
+    auth_endpoint = "status"
     http_method_names = ["get"]
 
     def get(self, request):
@@ -368,16 +396,18 @@ class ExecuteTaskView(BackendAuthMixin, View):
         5. On retry, allow_retry=true allows the FAILED task to be re-executed
 
     Authentication:
-        The backend can provide an authentication handler via get_auth_handler().
-        When using CloudTasksDatabaseBackend with OIDC configuration, the
-        OIDC token is automatically verified before task execution.
+        The backend provides the authentication handlers via
+        get_auth_handlers(). When using CloudTasksDatabaseBackend with OIDC
+        configuration, the OIDC token is automatically verified before task
+        execution.
 
-        For custom authentication, subclass the backend and override
-        get_auth_handler() to return a callable that takes a request and returns:
-        - None if authentication succeeds
-        - A JsonResponse with error details if authentication fails
+        Handlers can also be configured with the AUTH_HANDLERS backend option
+        (see django_database_task.auth). A request is accepted as soon as one
+        handler accepts it, so Cloud Tasks and an external caller can use
+        different credentials on the same endpoint.
     """
 
+    auth_endpoint = "execute"
     http_method_names = ["post"]
 
     def post(self, request, task_id):
@@ -464,6 +494,7 @@ class PurgeCompletedTasksView(BackendAuthMixin, View):
         GET /tasks/purge/?days=7&status=SUCCESSFUL,FAILED
     """
 
+    auth_endpoint = "purge"
     http_method_names = ["get", "post"]
 
     def _get_params(self, request):

@@ -295,3 +295,80 @@ class TestCloudTasksDatabaseBackendGetAuthHandler:
 
         handler = backend.get_auth_handler()
         assert handler is not None
+
+
+class TestCloudTasksDatabaseBackendGetAuthHandlers:
+    """Tests for combining the OIDC handler with configured handlers."""
+
+    @staticmethod
+    def _backend(monkeypatch, **extra_options):
+        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-project")
+        monkeypatch.setenv("CLOUD_RUN_REGION", "asia-northeast1")
+        monkeypatch.setenv("K_SERVICE", "my-service")
+
+        from django_database_task.cloudtasks import CloudTasksDatabaseBackend
+
+        options = {"CLOUD_TASKS_QUEUE": "default"}
+        options.update(extra_options)
+        return CloudTasksDatabaseBackend("default", {"OPTIONS": options})
+
+    def test_returns_nothing_without_any_configuration(self, monkeypatch):
+        """Endpoints stay unauthenticated when nothing is configured."""
+        backend = self._backend(monkeypatch)
+
+        assert backend.get_auth_handlers() == []
+
+    def test_returns_the_oidc_handler(self, monkeypatch):
+        """OIDC alone behaves as it did before 0.4."""
+        backend = self._backend(
+            monkeypatch,
+            OIDC_SERVICE_ACCOUNT_EMAIL="sa@project.iam.gserviceaccount.com",
+        )
+
+        assert len(backend.get_auth_handlers()) == 1
+
+    def test_oidc_and_a_shared_secret_coexist(self, monkeypatch):
+        """An external cron job can be let in alongside Cloud Tasks.
+
+        Before 0.4 the OIDC handler was the only one applied, so enabling it
+        locked every other caller out of the endpoints.
+        """
+        backend = self._backend(
+            monkeypatch,
+            OIDC_SERVICE_ACCOUNT_EMAIL="sa@project.iam.gserviceaccount.com",
+            AUTH_HANDLERS=["django_database_task.auth.SharedSecretAuth"],
+            AUTH_HANDLER_OPTIONS={"TOKEN": "s3cret"},
+        )
+
+        handlers = backend.get_auth_handlers()
+
+        assert len(handlers) == 2
+
+    def test_does_not_warn_about_the_deprecated_api(self, monkeypatch, recwarn):
+        """The bundled backend keeps get_auth_handler() without deprecation noise."""
+        backend = self._backend(
+            monkeypatch,
+            OIDC_SERVICE_ACCOUNT_EMAIL="sa@project.iam.gserviceaccount.com",
+        )
+        backend.get_auth_handlers()
+
+        assert [
+            w for w in recwarn.list if issubclass(w.category, DeprecationWarning)
+        ] == []
+
+    def test_configured_handlers_can_be_scoped_to_an_endpoint(self, monkeypatch):
+        """A cron-only credential need not apply to the execute endpoint."""
+        backend = self._backend(
+            monkeypatch,
+            OIDC_SERVICE_ACCOUNT_EMAIL="sa@project.iam.gserviceaccount.com",
+            AUTH_HANDLERS=[
+                {
+                    "HANDLER": "django_database_task.auth.SharedSecretAuth",
+                    "OPTIONS": {"TOKEN": "s3cret"},
+                    "ENDPOINTS": ["run", "purge"],
+                }
+            ],
+        )
+
+        assert len(backend.get_auth_handlers("execute")) == 1
+        assert len(backend.get_auth_handlers("purge")) == 2
