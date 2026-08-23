@@ -127,9 +127,40 @@ added to the CI install.
 ## Pull requests
 
 - Branch off `main`.
+- **One purpose per pull request.** See below.
 - Say what the change is for. A description that explains the problem is worth
   more than one that restates the diff.
 - Keep the tests and the linters green. CI runs the suite against Python 3.12
   to 3.14 and Django 6.0 and 6.1.
 - Add tests for a behaviour change. A bug fix wants the test that fails
   without it.
+
+### Split by purpose
+
+A pull request should answer one question, so that a reviewer can hold that
+question in their head while reading all of it. Several purposes in one branch
+means none of them gets read properly, and the risky part hides among the safe
+parts.
+
+Split it when a branch contains any of these:
+
+- **A refactor and the feature it makes possible.** Send the refactor first,
+  where the existing tests passing unmodified is the whole argument, and build
+  on it afterwards. Mixed together, that evidence is gone.
+- **A fix for something you noticed on the way.** Worth having, and worth
+  having on its own. The Cloud Tasks tests turning out never to have run came
+  out of unrelated work and went in as its own pull request.
+- **Mechanical churn beside a real change.** Reformatting, renaming, tidying
+  imports and dependency bumps drown the few lines that matter.
+- **Steps that make sense in sequence.** The 0.4 broker work went in as five
+  pull requests — the authentication handlers, the broker abstraction, the
+  worker option, the SQS broker, the documentation — each mergeable and
+  reviewable on its own.
+
+This holds however the change was produced, including with the help of an AI
+tool. A branch that grew in one sitting still has to arrive as the sequence of
+changes a reviewer can follow; splitting it afterwards is part of the work, not
+an optional tidy-up.
+
+A change that genuinely is one purpose can still be large, and that is fine.
+The test is whether the description needs the word "and".
