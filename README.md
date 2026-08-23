@@ -76,6 +76,10 @@ The minimum database versions are the ones Django itself requires, and Django
 
 ```bash
 pip install django-database-task
+
+# With a broker (see Task Brokers)
+pip install django-database-task[cloudtasks]
+pip install django-database-task[sqs]
 ```
 
 ## Quick Start
@@ -938,8 +942,13 @@ available and become the **fallback when the broker is down**: a broker
 failure is logged and the task is left `READY` in the database, so the next
 worker run or endpoint call picks it up.
 
-[Cloud Tasks](#google-cloud-tasks-integration) is the bundled broker. Name it
-by using its backend, which is the same as it has always been:
+Two brokers are bundled. Each has a backend that attaches it, so naming the
+backend is all a project has to do:
+
+| Broker | Backend | Shape |
+|--------|---------|-------|
+| [Cloud Tasks](#google-cloud-tasks-integration) | `django_database_task.cloudtasks.CloudTasksDatabaseBackend` | Push: calls an [HTTP endpoint](#http-endpoints-optional) of your app |
+| [Amazon SQS](#amazon-sqs-integration) | `django_database_task.sqs.SQSDatabaseBackend` | Pull: a worker receives from the queue |
 
 ```python
 TASKS = {
@@ -1197,6 +1206,107 @@ if is_cloud_run():
 elif is_app_engine():
     print(f"Running on App Engine in project {detect_gcp_project()}")
 ```
+
+## Amazon SQS Integration
+
+Send a message to SQS whenever a task is saved, and let a worker receive those
+messages. Unlike Cloud Tasks, SQS is a **pull** broker: nothing calls your
+application, so there is no HTTP endpoint to expose and nothing to
+authenticate.
+
+### Installation
+
+```bash
+pip install django-database-task[sqs]
+```
+
+### Quick Setup
+
+```python
+# settings.py
+TASKS = {
+    "default": {
+        "BACKEND": "django_database_task.sqs.SQSDatabaseBackend",
+        "QUEUES": [],  # Allow all queue names
+    },
+}
+```
+
+```bash
+python manage.py run_database_tasks --continuous
+```
+
+That is the same worker command as always. With an SQS broker configured it
+receives from the queue and sweeps the database, because `--source` defaults
+to `auto`. See [Task sources](#task-sources).
+
+Credentials come from the usual boto3 chain: the instance or task role, the
+environment, or `~/.aws/credentials`. The task needs `sqs:SendMessage`,
+`sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility` and,
+unless you set `SQS_QUEUE_URL_TEMPLATE`, `sqs:GetQueueUrl`.
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `AWS_REGION` | Region. Detected from `AWS_REGION` or `AWS_DEFAULT_REGION` when unset |
+| `SQS_QUEUE_URL_TEMPLATE` | Queue URL with a `{queue_name}` placeholder. Set it to skip the `GetQueueUrl` call |
+| `SQS_ENDPOINT_URL` | Endpoint override, for LocalStack |
+| `VISIBILITY_TIMEOUT` | Seconds a received message stays hidden. Leave unset to use the queue's own setting |
+| `MAX_DELAY_SECONDS` | Largest delay to put on a message (default: 900, the SQS limit) |
+
+### Queues
+
+The SQS queue name is the task's `queue_name` attribute, the same as with
+Cloud Tasks:
+
+```python
+@task(queue_name="ranking")
+def rebuild_ranking(tenant_id):
+    ...
+# → sent to the "ranking" SQS queue
+```
+
+Run one worker per queue with `--queue`:
+
+```bash
+python manage.py run_database_tasks --queue ranking --continuous
+```
+
+Use standard queues, not FIFO ones. Duplicate delivery is already handled by
+the task status and `SELECT FOR UPDATE SKIP LOCKED`, and ordering does not
+apply to independent tasks.
+
+Set the queue's visibility timeout to more than your longest task, or a second
+worker will start the same task before the first one finishes. Attach a
+dead letter queue with a `maxReceiveCount` to catch messages that keep coming
+back.
+
+### Deferred tasks
+
+**SQS cannot hold a message for longer than 15 minutes.** A task deferred
+further out than that is not sent to the queue at all:
+
+```python
+send_report.using(run_after=timezone.now() + timedelta(hours=3)).enqueue()
+```
+
+It stays `READY` in the database, and the database sweep the worker already
+performs runs it once it is due. This is why `--source` resolves to `both`
+rather than `broker`, and why the worker should be left running with
+`--continuous`. The same sweep recovers tasks SQS never accepted, since a
+broker failure during `enqueue()` is logged and swallowed.
+
+### Serverless
+
+On Lambda or App Runner, where no worker process can be kept running, put an
+HTTP push in front of the existing
+[`/tasks/execute/<task_id>/` endpoint](#http-endpoints-optional) instead —
+EventBridge Pipes with an SQS source and an API destination target needs no
+code of its own. Authenticate it with the
+[bundled handlers](#backend-authentication-handlers): an EventBridge
+connection sends an API key or basic credentials, which `SharedSecretAuth`
+verifies.
 
 ## Django Admin
 
