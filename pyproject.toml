@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "django-database-task"
-version = "0.4.0"
+version = "0.3.1"
 description = "A database-backed task queue backend for Django's built-in task framework"
 readme = "README.md"
 license = "MIT"
