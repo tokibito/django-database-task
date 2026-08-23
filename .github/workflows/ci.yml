@@ -27,9 +27,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # The cloudtasks extra is installed so the Cloud Tasks tests run
-          # instead of being skipped by their importorskip guard.
-          pip install -e ".[dev,cloudtasks]"
+          # The optional extras are installed so their tests run instead
+          # of being skipped by their importorskip guards.
+          pip install -e ".[dev,cloudtasks,sqs]"
           pip install "Django~=${{ matrix.django-version }}.0"
 
       - name: Run tests
