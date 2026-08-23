@@ -6,12 +6,16 @@ import threading
 import time
 from datetime import timedelta
 from io import StringIO
+from unittest.mock import patch
 
 import pytest
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.tasks.base import TaskResultStatus
 from django.utils import timezone
 
+from django_database_task.backends import DatabaseTaskBackend
+from django_database_task.brokers import BrokerMessage, HTTPPushBroker, PullBroker
 from django_database_task.models import DatabaseTask
 
 from . import tasks as test_tasks
@@ -415,3 +419,380 @@ class TestPurgeWithPendingTasks:
 
         assert DatabaseTask.objects.count() == 1
         assert DatabaseTask.objects.first().status == TaskResultStatus.READY
+
+
+class FakePullBroker(PullBroker):
+    """A pull broker whose messages are handed to it by the test."""
+
+    def __init__(self, backend=None, options=None, batches=None):
+        super().__init__(backend, options)
+        self.batches = list(batches or [])
+        self.received = []
+        self.acked = []
+        self.nacked = []
+
+    def enqueue(self, task_result):
+        pass
+
+    def receive(self, queue_name=None, max_messages=1, wait_seconds=20):
+        self.received.append(
+            {
+                "queue_name": queue_name,
+                "max_messages": max_messages,
+                "wait_seconds": wait_seconds,
+            }
+        )
+        if not self.batches:
+            return []
+        return self.batches.pop(0)[:max_messages]
+
+    def ack(self, message):
+        self.acked.append(message.task_id)
+
+    def nack(self, message, delay=None):
+        self.nacked.append(message.task_id)
+
+
+def make_backend(broker=None):
+    """Build a backend, optionally with a broker already attached."""
+    backend = DatabaseTaskBackend(alias="default", params={"QUEUES": []})
+    backend.broker = broker
+    if broker is not None:
+        broker.backend = backend
+    return backend
+
+
+def run_worker(backend, **options):
+    """Run the command against a backend built for the test."""
+    out = StringIO()
+    with patch.dict(
+        "django_database_task.management.commands.run_database_tasks.task_backends",
+        {"default": backend},
+        clear=False,
+    ):
+        call_command("run_database_tasks", stdout=out, stderr=out, **options)
+    return out.getvalue()
+
+
+@pytest.mark.django_db
+class TestSourceResolution:
+    """Tests for choosing where the worker reads tasks from."""
+
+    def test_auto_uses_the_database_without_a_broker(self):
+        output = run_worker(make_backend())
+
+        assert "Source: db" in output
+
+    def test_auto_uses_both_with_a_pull_broker(self):
+        output = run_worker(make_backend(FakePullBroker()))
+
+        assert "Source: both" in output
+
+    def test_auto_uses_the_database_with_a_push_only_broker(self):
+        """A broker that cannot be received from is not a task source."""
+        output = run_worker(make_backend(HTTPPushBroker(backend=None)))
+
+        assert "Source: db" in output
+
+    def test_db_is_honoured_even_with_a_broker(self):
+        broker = FakePullBroker()
+
+        output = run_worker(make_backend(broker), source="db")
+
+        assert "Source: db" in output
+        assert broker.received == []
+
+    def test_broker_source_requires_a_pull_broker(self):
+        with pytest.raises(CommandError, match="needs a backend whose broker"):
+            run_worker(make_backend(), source="broker")
+
+    def test_both_source_requires_a_pull_broker(self):
+        with pytest.raises(CommandError, match="needs a backend whose broker"):
+            run_worker(make_backend(), source="both")
+
+    def test_max_messages_must_be_positive(self):
+        with pytest.raises(CommandError, match="--max-messages must be at least 1"):
+            run_worker(make_backend(), max_messages=0)
+
+
+@pytest.mark.django_db
+class TestBrokerSource:
+    """Tests for running tasks the broker points at."""
+
+    def test_runs_the_task_a_message_names(self):
+        result = simple_task.enqueue(2, 3)
+        broker = FakePullBroker(batches=[[BrokerMessage(str(result.id))]])
+
+        run_worker(make_backend(broker), source="broker")
+
+        db_task = DatabaseTask.objects.get(id=result.id)
+        assert db_task.status == TaskResultStatus.SUCCESSFUL
+        assert db_task.return_value_json == 5
+        assert broker.acked == [str(result.id)]
+
+    def test_does_not_touch_the_database_queue(self):
+        """Only what the broker names is run in broker mode."""
+        untouched = simple_task.enqueue(1, 1)
+        broker = FakePullBroker(batches=[[]])
+
+        run_worker(make_backend(broker), source="broker")
+
+        assert DatabaseTask.objects.get(id=untouched.id).status == (
+            TaskResultStatus.READY
+        )
+
+    def test_a_failing_task_is_still_acknowledged(self):
+        """The failure is recorded, so redelivering would only repeat it."""
+        result = failing_task.enqueue()
+        broker = FakePullBroker(batches=[[BrokerMessage(str(result.id))]])
+
+        run_worker(make_backend(broker), source="broker")
+
+        assert DatabaseTask.objects.get(id=result.id).status == TaskResultStatus.FAILED
+        assert broker.acked == [str(result.id)]
+        assert broker.nacked == []
+
+    def test_a_message_for_a_deleted_task_is_dropped(self):
+        broker = FakePullBroker(
+            batches=[[BrokerMessage("3f2a9c11-0000-4000-8000-000000000000")]]
+        )
+
+        output = run_worker(make_backend(broker), source="broker")
+
+        assert "no longer exists" in output
+        assert broker.acked == ["3f2a9c11-0000-4000-8000-000000000000"]
+
+    def test_a_message_for_a_finished_task_is_acknowledged(self):
+        result = simple_task.enqueue(1, 1)
+        DatabaseTask.objects.filter(id=result.id).update(
+            status=TaskResultStatus.SUCCESSFUL
+        )
+        broker = FakePullBroker(batches=[[BrokerMessage(str(result.id))]])
+
+        output = run_worker(make_backend(broker), source="broker")
+
+        assert "not ready to run" in output
+        assert broker.acked == [str(result.id)]
+        assert "Total tasks processed: 0" in output
+
+    def test_a_worker_side_failure_returns_the_message(self, monkeypatch):
+        """A broken worker must not swallow the task."""
+        result = simple_task.enqueue(1, 1)
+        broker = FakePullBroker(batches=[[BrokerMessage(str(result.id))]])
+        monkeypatch.setattr(
+            "django_database_task.management.commands.run_database_tasks."
+            "run_task_by_id",
+            lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("database is down")),
+        )
+
+        output = run_worker(make_backend(broker), source="broker")
+
+        assert "database is down" in output
+        assert broker.acked == []
+        assert broker.nacked == [str(result.id)]
+
+    def test_a_broker_failure_does_not_stop_the_worker(self):
+        class BrokenBroker(FakePullBroker):
+            def receive(self, queue_name=None, max_messages=1, wait_seconds=20):
+                raise RuntimeError("broker is down")
+
+        output = run_worker(make_backend(BrokenBroker()), source="broker")
+
+        assert "Error receiving from broker" in output
+        assert "Total tasks processed: 0" in output
+
+    def test_the_queue_and_limits_are_passed_to_the_broker(self):
+        broker = FakePullBroker()
+
+        run_worker(
+            make_backend(broker),
+            source="broker",
+            queue="emails",
+            max_messages=5,
+            wait_time=3.0,
+        )
+
+        assert broker.received == [
+            {"queue_name": "emails", "max_messages": 5, "wait_seconds": 3.0}
+        ]
+
+    def test_max_tasks_caps_what_is_requested(self):
+        """The worker never receives more messages than it may run."""
+        results = [simple_task.enqueue(1, 1) for _ in range(3)]
+        broker = FakePullBroker(batches=[[BrokerMessage(str(r.id)) for r in results]])
+
+        run_worker(make_backend(broker), source="broker", max_messages=10, max_tasks=2)
+
+        assert broker.received[0]["max_messages"] == 2
+        assert len(broker.acked) == 2
+        assert (
+            DatabaseTask.objects.filter(status=TaskResultStatus.SUCCESSFUL).count() == 2
+        )
+
+
+@pytest.mark.django_db
+class TestBothSources:
+    """Tests for reading from the broker and the database together."""
+
+    def test_the_broker_is_polled_without_waiting(self):
+        """The database must get its turn, so the first poll cannot block."""
+        broker = FakePullBroker()
+
+        run_worker(make_backend(broker), source="both")
+
+        assert broker.received[0]["wait_seconds"] == 0
+
+    def test_the_database_is_used_when_the_broker_is_empty(self):
+        """This is what picks up deferred tasks a broker cannot hold."""
+        result = simple_task.enqueue(4, 4)
+        broker = FakePullBroker()
+
+        run_worker(make_backend(broker), source="both")
+
+        db_task = DatabaseTask.objects.get(id=result.id)
+        assert db_task.status == TaskResultStatus.SUCCESSFUL
+        assert db_task.return_value_json == 8
+
+    def test_the_broker_is_preferred_over_the_database(self):
+        from_broker = simple_task.enqueue(1, 1)
+        simple_task.enqueue(2, 2)
+        broker = FakePullBroker(batches=[[BrokerMessage(str(from_broker.id))]])
+
+        run_worker(make_backend(broker), source="both", max_tasks=1)
+
+        assert DatabaseTask.objects.get(id=from_broker.id).status == (
+            TaskResultStatus.SUCCESSFUL
+        )
+
+    def test_both_sources_are_drained(self):
+        from_broker = simple_task.enqueue(1, 1)
+        from_database = simple_task.enqueue(2, 2)
+        broker = FakePullBroker(batches=[[BrokerMessage(str(from_broker.id))]])
+
+        run_worker(make_backend(broker), source="both")
+
+        assert (
+            DatabaseTask.objects.filter(status=TaskResultStatus.SUCCESSFUL).count() == 2
+        )
+        assert broker.acked == [str(from_broker.id)]
+        assert DatabaseTask.objects.get(id=from_database.id).status == (
+            TaskResultStatus.SUCCESSFUL
+        )
+
+
+@pytest.mark.django_db
+class TestBrokerContinuousMode:
+    """Tests for the worker staying up while receiving from a broker."""
+
+    def test_the_broker_wait_replaces_the_idle_interval(self):
+        """A long poll is the wait, so no interval sleep is added to it."""
+        waits = []
+
+        class WaitRecordingBroker(FakePullBroker):
+            def receive(self, queue_name=None, max_messages=1, wait_seconds=20):
+                waits.append(wait_seconds)
+                if len(waits) >= 3:
+                    os.kill(os.getpid(), signal.SIGTERM)
+                return []
+
+        started = time.monotonic()
+        run_worker(
+            make_backend(WaitRecordingBroker()),
+            source="broker",
+            continuous=True,
+            wait_time=0.01,
+            interval=30,
+        )
+
+        # An added interval sleep would make this take at least 30 seconds.
+        assert time.monotonic() - started < 10
+        assert waits[:3] == [0.01, 0.01, 0.01]
+
+    def test_both_waits_on_the_broker_when_everything_is_idle(self):
+        waits = []
+
+        class WaitRecordingBroker(FakePullBroker):
+            def receive(self, queue_name=None, max_messages=1, wait_seconds=20):
+                waits.append(wait_seconds)
+                if len(waits) >= 4:
+                    os.kill(os.getpid(), signal.SIGTERM)
+                return []
+
+        run_worker(
+            make_backend(WaitRecordingBroker()),
+            source="both",
+            continuous=True,
+            wait_time=0.01,
+            interval=30,
+        )
+
+        # A non-blocking poll, then the blocking one that stands in for
+        # the idle interval, and around again.
+        assert waits[:4] == [0, 0.01, 0, 0.01]
+
+    def test_a_shutdown_signal_stops_the_worker(self):
+        class SignallingBroker(FakePullBroker):
+            def receive(self, queue_name=None, max_messages=1, wait_seconds=20):
+                os.kill(os.getpid(), signal.SIGTERM)
+                return []
+
+        output = run_worker(
+            make_backend(SignallingBroker()),
+            source="broker",
+            continuous=True,
+            wait_time=0.01,
+        )
+
+        assert "Shutdown complete" in output
+
+
+@pytest.mark.django_db
+class TestBrokerLifecycle:
+    """Tests for releasing whatever the broker holds open."""
+
+    def test_the_broker_is_closed_when_the_worker_stops(self):
+        class ClosingBroker(FakePullBroker):
+            closed = 0
+
+            def close(self):
+                type(self).closed += 1
+
+        broker = ClosingBroker()
+
+        run_worker(make_backend(broker), source="broker")
+
+        assert type(broker).closed == 1
+
+    def test_the_broker_is_closed_after_a_failure(self):
+        class BrokenBroker(FakePullBroker):
+            closed = 0
+
+            def receive(self, queue_name=None, max_messages=1, wait_seconds=20):
+                raise RuntimeError("broker is down")
+
+            def close(self):
+                type(self).closed += 1
+
+        run_worker(make_backend(BrokenBroker()), source="broker")
+
+        assert BrokenBroker.closed == 1
+
+    def test_a_broker_that_is_not_used_is_left_alone(self):
+        class ClosingBroker(FakePullBroker):
+            closed = 0
+
+            def close(self):
+                type(self).closed += 1
+
+        run_worker(make_backend(ClosingBroker()), source="db")
+
+        assert ClosingBroker.closed == 0
+
+    def test_a_failure_to_close_is_reported_not_raised(self):
+        class UnclosableBroker(FakePullBroker):
+            def close(self):
+                raise RuntimeError("connection already gone")
+
+        output = run_worker(make_backend(UnclosableBroker()), source="broker")
+
+        assert "Error closing the broker" in output
