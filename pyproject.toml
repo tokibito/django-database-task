@@ -77,7 +77,8 @@ python_functions = ["test_*"]
 addopts = "-v"
 
 [tool.ruff]
-target-version = "py312"
+# target-version is left unset on purpose: ruff infers it from
+# project.requires-python, so the oldest supported Python is stated once.
 line-length = 88
 # Ruff formats Python code blocks inside Markdown. The documentation
 # snippets are deliberately compact (no PEP 8 blank-line padding around
