@@ -744,3 +744,55 @@ class TestBrokerContinuousMode:
         )
 
         assert "Shutdown complete" in output
+
+
+@pytest.mark.django_db
+class TestBrokerLifecycle:
+    """Tests for releasing whatever the broker holds open."""
+
+    def test_the_broker_is_closed_when_the_worker_stops(self):
+        class ClosingBroker(FakePullBroker):
+            closed = 0
+
+            def close(self):
+                type(self).closed += 1
+
+        broker = ClosingBroker()
+
+        run_worker(make_backend(broker), source="broker")
+
+        assert type(broker).closed == 1
+
+    def test_the_broker_is_closed_after_a_failure(self):
+        class BrokenBroker(FakePullBroker):
+            closed = 0
+
+            def receive(self, queue_name=None, max_messages=1, wait_seconds=20):
+                raise RuntimeError("broker is down")
+
+            def close(self):
+                type(self).closed += 1
+
+        run_worker(make_backend(BrokenBroker()), source="broker")
+
+        assert BrokenBroker.closed == 1
+
+    def test_a_broker_that_is_not_used_is_left_alone(self):
+        class ClosingBroker(FakePullBroker):
+            closed = 0
+
+            def close(self):
+                type(self).closed += 1
+
+        run_worker(make_backend(ClosingBroker()), source="db")
+
+        assert ClosingBroker.closed == 0
+
+    def test_a_failure_to_close_is_reported_not_raised(self):
+        class UnclosableBroker(FakePullBroker):
+            def close(self):
+                raise RuntimeError("connection already gone")
+
+        output = run_worker(make_backend(UnclosableBroker()), source="broker")
+
+        assert "Error closing the broker" in output

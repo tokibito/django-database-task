@@ -156,6 +156,10 @@ class Command(BaseCommand):
         with ExitStack() as stack:
             if graceful:
                 stack.enter_context(shutdown)
+            if source in (SOURCE_BROKER, SOURCE_BOTH):
+                # A broker a worker receives from may hold a connection
+                # open, so release it however the loop ends.
+                stack.callback(self._close_broker, backend.broker)
             tasks_processed = self._process_tasks(
                 shutdown=shutdown,
                 backend=backend,
@@ -374,6 +378,12 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.SUCCESS("  Task completed successfully"))
         else:
             self.stdout.write(self.style.ERROR("  Task failed"))
+
+    def _close_broker(self, broker):
+        try:
+            broker.close()
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f"\nError closing the broker: {e}"))
 
     def _ack(self, broker, message):
         try:
