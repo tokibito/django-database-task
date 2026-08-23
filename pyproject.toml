@@ -70,6 +70,9 @@ django_database_task = ["locale/*/LC_MESSAGES/*.mo", "locale/*/LC_MESSAGES/*.po"
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "tests.settings"
+# Without this a bare `pytest` also collects any Django checkout kept
+# beside the project for reference, which fails before a test can run.
+testpaths = ["tests"]
 pythonpath = ["."]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]

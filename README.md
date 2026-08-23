@@ -1385,6 +1385,11 @@ These actions are useful for:
 - Retrying failed tasks after fixing issues
 - Testing task execution during development
 
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for how to set up a development environment, run the tests and add a broker.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
