@@ -28,7 +28,14 @@ commands and their defaults all behave as they did in 0.3.
   different credentials. Configure them with the `AUTH_HANDLERS` option, and
   limit one to some endpoints with `ENDPOINTS`.
 - **Bundled authentication handlers** in `django_database_task.auth`:
-  `SharedSecretAuth`, `HMACAuth` and `StaffOnlyAuth`.
+  `SharedSecretAuth`, `HMACAuth` and `StaffOnlyAuth`, with `build_signature()`
+  for callers that have to sign a request for `HMACAuth`.
+- **AWS environment detection** in `django_database_task.sqs`:
+  `detect_aws_region()`, `is_lambda()` and `is_ecs()`, alongside the existing
+  Cloud Tasks ones.
+- The brokers themselves are importable, for a project that wants one on a
+  backend of its own: `django_database_task.sqs.SQSBroker` and
+  `django_database_task.cloudtasks.CloudTasksBroker`.
 
 ### Fixed
 
@@ -44,3 +51,15 @@ commands and their defaults all behave as they did in 0.3.
 - `get_auth_handler()` (singular). It still works, with a
   `DeprecationWarning`, and is removed in 0.5. Override `get_auth_handlers()`
   instead.
+
+### Documentation
+
+- A *Task Brokers* section in the README, and an Amazon SQS one with a
+  sequence diagram beside the ones the database backend and Cloud Tasks
+  already had.
+- An SQS walkthrough in `examples/`, run against a local mock: set
+  `DEMO_BROKER=sqs` to point the demo project at it.
+- `CONTRIBUTING.md`, covering the development setup, the tests, and how to add
+  a broker.
+- This file. Releases before 0.4.0 are in the git history and the GitHub
+  releases.
