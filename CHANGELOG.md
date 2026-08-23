@@ -1,8 +1,6 @@
 # Changelog
 
-## Unreleased
-
-To be released as 0.4.0.
+## 0.4.0
 
 Brokers — the services that trigger execution of a saved task — are now
 separate from the task backend, and Amazon SQS joins Cloud Tasks as one of
