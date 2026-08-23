@@ -80,6 +80,129 @@ cd examples
    ```
 3. Verify the task is processed only by the emails queue worker
 
+## Trying the SQS broker
+
+The demo runs on the plain database backend by default. Set `DEMO_BROKER=sqs`
+to run it against Amazon SQS instead, with a local mock standing in for AWS.
+
+### 1. Start a local SQS
+
+[moto](https://github.com/getmoto/moto) is the lightest option: it is a Python
+package, so no container is needed.
+
+```bash
+../venv/bin/pip install "django-database-task[sqs]" "moto[server]"
+../venv/bin/python -m moto.server -p 5555
+```
+
+Any other SQS compatible endpoint, LocalStack included, works the same way —
+point `SQS_ENDPOINT_URL` at it instead.
+
+### 2. Create the queues
+
+The SQS queue name is the task's `queue_name`, so the demo needs one queue per
+queue name its tasks use.
+
+```bash
+cd examples
+
+export AWS_ACCESS_KEY_ID=test
+export AWS_SECRET_ACCESS_KEY=test
+export AWS_REGION=ap-northeast-1
+export SQS_ENDPOINT_URL=http://localhost:5555
+export DEMO_BROKER=sqs
+
+../venv/bin/python -c "
+import boto3, os
+sqs = boto3.client('sqs', region_name=os.environ['AWS_REGION'],
+                   endpoint_url=os.environ['SQS_ENDPOINT_URL'])
+for name in ['default', 'emails']:
+    print(sqs.create_queue(QueueName=name)['QueueUrl'])
+"
+```
+
+### 3. Enqueue a task
+
+```bash
+../venv/bin/python manage.py shell -c "
+from demo_app.tasks import add_numbers
+print(add_numbers.enqueue(2, 3).id)
+"
+```
+
+The task is saved to the database and a message naming it is sent to the
+`default` queue.
+
+### 4. Run the worker
+
+```bash
+../venv/bin/python manage.py run_database_tasks
+```
+
+```
+Worker ID: host-abe60385
+Backend: default
+Source: both
+Broker: SQSBroker (wait=20.0s, max_messages=1)
+
+Processing task from broker: 5eac9590-8515-4ab1-b0ce-4f38f780f909
+  Task completed successfully
+No more tasks to process.
+
+Total tasks processed: 2
+```
+
+Same command as always. `Source: both` is `--source auto` noticing the broker:
+the worker receives from SQS and sweeps the database.
+
+### Queues
+
+A worker without `--queue` receives from the `default` SQS queue only, while
+its database sweep covers every queue. So a task on another queue is run, but
+by the database half of the worker, and its SQS message is left behind. Run one
+worker per queue instead:
+
+```bash
+../venv/bin/python manage.py run_database_tasks --queue emails --continuous
+```
+
+A message for a task that has already run is not a problem: the worker reports
+`Task is not ready to run; nothing to do` and deletes it.
+
+### Deferred tasks and the 15 minute limit
+
+SQS cannot hold a message for longer than 15 minutes, so a task deferred
+further out is not sent to the queue at all.
+
+```bash
+../venv/bin/python manage.py shell -c "
+from datetime import timedelta
+from django.utils import timezone
+from demo_app.tasks import add_numbers
+
+add_numbers.using(run_after=timezone.now() + timedelta(minutes=5)).enqueue(1, 1)
+add_numbers.using(run_after=timezone.now() + timedelta(hours=3)).enqueue(2, 2)
+"
+
+../venv/bin/python -c "
+import boto3, os
+sqs = boto3.client('sqs', region_name=os.environ['AWS_REGION'],
+                   endpoint_url=os.environ['SQS_ENDPOINT_URL'])
+url = sqs.get_queue_url(QueueName='default')['QueueUrl']
+print(sqs.get_queue_attributes(QueueUrl=url, AttributeNames=[
+    'ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesDelayed',
+])['Attributes'])
+"
+```
+
+Only the five minute task is in the queue, as a delayed message. The three hour
+one stays `READY` in the database, and the worker's database sweep runs it once
+it is due — which is why the worker should be left running with `--continuous`.
+
+### Back to the database backend
+
+Unset `DEMO_BROKER`, or set it to anything other than `sqs`.
+
 ## Purge Completed Tasks
 
 ```bash
