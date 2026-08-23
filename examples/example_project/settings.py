@@ -2,6 +2,7 @@
 Django settings for example_project.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -78,10 +79,31 @@ STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Task backend settings
-TASKS = {
-    "default": {
-        "BACKEND": "django_database_task.backends.DatabaseTaskBackend",
-        "QUEUES": [],
-        "OPTIONS": {},
-    },
-}
+#
+# The demo runs on the plain database backend by default. Set
+# DEMO_BROKER=sqs to try the SQS broker against LocalStack instead; see
+# the "Trying the SQS broker" section of examples/README.md.
+DEMO_BROKER = os.environ.get("DEMO_BROKER", "database")
+
+if DEMO_BROKER == "sqs":
+    TASKS = {
+        "default": {
+            "BACKEND": "django_database_task.sqs.SQSDatabaseBackend",
+            "QUEUES": [],
+            "OPTIONS": {
+                "AWS_REGION": os.environ.get("AWS_REGION", "ap-northeast-1"),
+                # LocalStack, rather than the real SQS
+                "SQS_ENDPOINT_URL": os.environ.get(
+                    "SQS_ENDPOINT_URL", "http://localhost:4566"
+                ),
+            },
+        },
+    }
+else:
+    TASKS = {
+        "default": {
+            "BACKEND": "django_database_task.backends.DatabaseTaskBackend",
+            "QUEUES": [],
+            "OPTIONS": {},
+        },
+    }
