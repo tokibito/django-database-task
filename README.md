@@ -1245,6 +1245,60 @@ environment, or `~/.aws/credentials`. The task needs `sqs:SendMessage`,
 `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility` and,
 unless you set `SQS_QUEUE_URL_TEMPLATE`, `sqs:GetQueueUrl`.
 
+### How It Works
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant Backend as SQSDatabaseBackend
+    participant DB as Database
+    participant SQS as Amazon SQS
+    participant Worker as Worker Process
+
+    Note over App,Worker: Task Enqueue
+    App->>Backend: task.enqueue(args, kwargs)
+    Backend->>DB: INSERT task (status=READY)
+    DB-->>Backend: Task ID
+    alt No run_after, or within 15 minutes
+        Backend->>SQS: SendMessage (task_id only,<br/>DelaySeconds)
+        SQS-->>Backend: MessageId
+    else Deferred beyond the SQS delay limit
+        Note over Backend,SQS: Not sent. The task waits in the<br/>database for the sweep below
+    end
+    Backend-->>App: TaskResult (id, status=READY)
+
+    Note over App,Worker: Task Execution (the worker receives)
+    loop run_database_tasks --continuous
+        Worker->>SQS: ReceiveMessage (long poll)
+        alt A message is waiting
+            SQS-->>Worker: task_id + ReceiptHandle
+            Worker->>DB: SELECT FOR UPDATE SKIP LOCKED<br/>(id=task_id, status=READY)
+            Worker->>DB: UPDATE status=RUNNING
+            Worker->>Worker: Execute task function
+            Worker->>DB: UPDATE status=SUCCESSFUL / FAILED
+            Worker->>SQS: DeleteMessage (only now)
+        else The queue is empty
+            Worker->>DB: SELECT FOR UPDATE SKIP LOCKED<br/>(status=READY, run_after <= now)
+            Worker->>Worker: Execute task function
+            Worker->>DB: UPDATE status=SUCCESSFUL / FAILED
+        end
+    end
+```
+
+The message carries only the task id, the same as with Cloud Tasks. What that
+buys here:
+
+- **The message is deleted after the task finishes**, not when it is received.
+  A worker that dies mid-task leaves the message to reappear once the
+  visibility timeout expires, so nothing is lost. Should it be delivered twice
+  anyway, the `READY` check and the row lock mean only one worker runs it
+- **The database sweep is the other half of the worker.** It runs tasks SQS
+  could not carry — anything deferred past 15 minutes — along with anything the
+  broker never accepted, since a `SendMessage` failure is logged and swallowed
+  rather than losing the task
+- **Nothing calls the application**, so there is no endpoint to expose and no
+  credentials for SQS to present, unlike the push model Cloud Tasks uses
+
 ### Options
 
 | Option | Description |
