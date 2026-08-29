@@ -1,4 +1,6 @@
+import logging
 import socket
+import sys
 import uuid
 from contextlib import ExitStack
 
@@ -6,6 +8,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.tasks import task_backends
 from django.tasks.base import TaskResultStatus
 
+from django_database_task.backends import task_log_fields
 from django_database_task.brokers import PullBroker
 from django_database_task.executor import fetch_task, run_task_by_id
 from django_database_task.models import DatabaseTask
@@ -17,6 +20,19 @@ SOURCE_DATABASE = "db"
 SOURCE_BROKER = "broker"
 SOURCE_BOTH = "both"
 SOURCES = [SOURCE_AUTO, SOURCE_DATABASE, SOURCE_BROKER, SOURCE_BOTH]
+
+logger = logging.getLogger("django_database_task")
+
+
+def _exit_code_argument(value):
+    """Parse an exit code option, rejecting what a shell cannot report."""
+    try:
+        code = int(value)
+    except ValueError:
+        raise CommandError(f"Exit codes must be whole numbers, not {value!r}") from None
+    if not 0 <= code <= 255:
+        raise CommandError(f"Exit codes must be between 0 and 255, not {code}")
+    return code
 
 
 class Command(BaseCommand):
@@ -100,6 +116,28 @@ class Command(BaseCommand):
                 "terminated immediately, even while a task is running"
             ),
         )
+        parser.add_argument(
+            "--empty-exit-code",
+            type=_exit_code_argument,
+            default=0,
+            metavar="CODE",
+            help=(
+                "Exit with this code when no task was processed, so a job "
+                "scheduler can tell an idle run from a real one "
+                "(0=exit normally, default: 0)"
+            ),
+        )
+        parser.add_argument(
+            "--failed-exit-code",
+            type=_exit_code_argument,
+            default=0,
+            metavar="CODE",
+            help=(
+                "Exit with this code when at least one task failed or could "
+                "not be run. Takes precedence over --empty-exit-code "
+                "(0=exit normally, default: 0)"
+            ),
+        )
 
     def handle(self, *args, **options):
         queue_name = options["queue"]
@@ -111,6 +149,8 @@ class Command(BaseCommand):
         max_messages = options["max_messages"]
         shutdown_timeout = options["shutdown_timeout"]
         graceful = not options["no_graceful_shutdown"]
+        empty_exit_code = options["empty_exit_code"]
+        failed_exit_code = options["failed_exit_code"]
         verbosity = options["verbosity"]
 
         if max_messages < 1:
@@ -146,6 +186,25 @@ class Command(BaseCommand):
                 self.stdout.write("Graceful shutdown: disabled")
 
         self.verbosity = verbosity
+        # Counted here rather than returned from the loop because a task can
+        # fail at several depths (the run itself, the broker message that
+        # named it) and every one of them feeds the same exit code.
+        self.tasks_failed = 0
+
+        logger.info(
+            "Worker started: id=%s backend=%s source=%s",
+            worker_id,
+            backend_name,
+            source,
+            extra={
+                "worker_id": worker_id,
+                "backend_alias": backend_name,
+                "source": source,
+                "queue_name": queue_name,
+                "continuous": continuous,
+            },
+        )
+
         shutdown = GracefulShutdown(
             timeout=shutdown_timeout,
             on_signal=self._report_signal,
@@ -180,8 +239,49 @@ class Command(BaseCommand):
                 self.style.WARNING("\nShutdown complete (no task was interrupted).")
             )
 
+        exit_code = self._exit_code(tasks_processed, empty_exit_code, failed_exit_code)
+
         if verbosity >= 1:
             self.stdout.write(f"\nTotal tasks processed: {tasks_processed}")
+            if self.tasks_failed:
+                self.stdout.write(
+                    self.style.ERROR(f"Tasks failed: {self.tasks_failed}")
+                )
+
+        logger.info(
+            "Worker finished: id=%s processed=%d failed=%d",
+            worker_id,
+            tasks_processed,
+            self.tasks_failed,
+            extra={
+                "worker_id": worker_id,
+                "backend_alias": backend_name,
+                "queue_name": queue_name,
+                "tasks_processed": tasks_processed,
+                "tasks_failed": self.tasks_failed,
+                "exit_code": exit_code,
+            },
+        )
+
+        if exit_code:
+            sys.exit(exit_code)
+
+    def _exit_code(self, tasks_processed, empty_exit_code, failed_exit_code):
+        """
+        Work out what to report to whatever started the worker.
+
+        Both codes default to 0, which leaves the run indistinguishable from
+        any other successful command -- the behaviour before these options
+        existed. A failure wins over an idle run: a broker message the
+        worker could not run at all counts as a failure without adding to
+        the processed count, so both conditions can hold at once, and the
+        failure is the one worth waking someone for.
+        """
+        if self.tasks_failed and failed_exit_code:
+            return failed_exit_code
+        if not tasks_processed and empty_exit_code:
+            return empty_exit_code
+        return 0
 
     def _resolve_source(self, backend, source):
         """
@@ -307,9 +407,18 @@ class Command(BaseCommand):
         try:
             result = backend.run_task(task, worker_id=worker_id)
         except Exception as e:
+            logger.exception(
+                "Worker could not run task: id=%s path=%s",
+                task.id,
+                task.task_path,
+                extra=task_log_fields(task, worker_id),
+            )
             self.stdout.write(self.style.ERROR(f"  Error running task: {e}"))
+            self.tasks_failed += 1
             return
 
+        if result.status != TaskResultStatus.SUCCESSFUL:
+            self.tasks_failed += 1
         self._report_result(result.status, verbosity)
 
     def _receive_and_run(
@@ -326,6 +435,15 @@ class Command(BaseCommand):
                 wait_seconds=wait_seconds,
             )
         except Exception as e:
+            logger.exception(
+                "Error receiving from broker %s",
+                type(broker).__name__,
+                extra={
+                    "worker_id": worker_id,
+                    "queue_name": queue_name,
+                    "broker": type(broker).__name__,
+                },
+            )
             self.stdout.write(self.style.ERROR(f"\nError receiving from broker: {e}"))
             return 0
 
@@ -358,7 +476,13 @@ class Command(BaseCommand):
         except Exception as e:
             # The task itself is recorded as failed by run_task(); getting
             # here means this worker could not run it at all.
+            logger.exception(
+                "Worker could not run task from broker: id=%s",
+                message.task_id,
+                extra={"worker_id": worker_id, "task_id": str(message.task_id)},
+            )
             self.stdout.write(self.style.ERROR(f"  Error running task: {e}"))
+            self.tasks_failed += 1
             self._nack(broker, message)
             return False
 
@@ -369,6 +493,8 @@ class Command(BaseCommand):
                 self.stdout.write("  Task is not ready to run; nothing to do")
             return False
 
+        if result.status != TaskResultStatus.SUCCESSFUL:
+            self.tasks_failed += 1
         self._report_result(result.status, verbosity)
         return True
 

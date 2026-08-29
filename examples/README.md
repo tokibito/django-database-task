@@ -501,6 +501,116 @@ print(t.errors_json[0]['traceback'])
 Use `--mark-failed` to get this for every stale task, without requeueing
 anything - the right choice for tasks that are not safe to run twice.
 
+## Running from a Job Scheduler
+
+A scheduler such as JP1, Hinemos, Rundeck, cron or a systemd timer starts the
+worker, waits for it to exit, and decides what happened from the exit code.
+Both exit code options are opt-in, so try them here before wiring up a job.
+
+### 1. Nothing to do
+
+```bash
+cd examples
+
+# Make sure the queue is empty first
+../venv/bin/python manage.py run_database_tasks -v 0
+
+../venv/bin/python manage.py run_database_tasks \
+    --empty-exit-code=4 --failed-exit-code=1 -v 0
+echo "exit=$?"
+# exit=4
+```
+
+Without `--empty-exit-code` the same run exits 0, which is why a scheduler
+cannot otherwise tell an idle minute from a productive one.
+
+### 2. A task that succeeds
+
+```bash
+../venv/bin/python manage.py shell -c "
+from demo_app.tasks import add_numbers
+add_numbers.enqueue(10, 20)
+"
+
+../venv/bin/python manage.py run_database_tasks \
+    --empty-exit-code=4 --failed-exit-code=1 -v 0
+echo "exit=$?"
+# exit=0
+```
+
+### 3. A task that fails
+
+```bash
+../venv/bin/python manage.py shell -c "
+from demo_app.tasks import failing_task
+failing_task.enqueue()
+"
+
+../venv/bin/python manage.py run_database_tasks \
+    --empty-exit-code=4 --failed-exit-code=1 -v 0
+echo "exit=$?"
+# exit=1
+```
+
+The traceback is printed and also stored on the task, so the nonzero exit is a
+prompt to look rather than the report itself:
+
+```bash
+../venv/bin/python manage.py shell -c "
+from django_database_task.models import DatabaseTask
+t = DatabaseTask.objects.filter(status='FAILED').latest('created_at')
+print(t.task_path, t.errors_json[0]['exception_class_path'])
+"
+# demo_app.tasks.failing_task builtins.ValueError
+```
+
+### 4. Keeping runs from overlapping
+
+A task that outlives the scheduler's interval would otherwise have the next
+launch pile on behind it. `flock` prevents that from outside the worker:
+
+```bash
+# A task that takes about 30 seconds
+../venv/bin/python manage.py shell -c "
+from demo_app.tasks import process_data
+process_data.enqueue(3000)
+"
+
+flock -n --conflict-exit-code 3 /tmp/ddt-demo.lock \
+    ../venv/bin/python manage.py run_database_tasks -v 0 &
+sleep 2
+
+# The second launch does not wait and does not run
+flock -n --conflict-exit-code 3 /tmp/ddt-demo.lock \
+    ../venv/bin/python manage.py run_database_tasks -v 0
+echo "exit=$?"
+# exit=3
+
+wait
+```
+
+`--conflict-exit-code 3` is what keeps "already running" apart from a failed
+task; plain `flock -n` exits 1 for both.
+
+### 5. Structured logs
+
+Add the `JSONFormatter` from the
+[main README](../README.md#structured-logging) to
+`example_project/settings.py` and run a task again. Every record then arrives
+with `task_id`, `task_path`, `queue_name`, `worker_id`, `status`,
+`duration_ms` and the rest as JSON fields:
+
+```json
+{"timestamp": "2026-01-01 12:00:00,123", "level": "INFO",
+ "logger": "django_database_task", "message": "Task completed successfully: ...",
+ "task_id": "ee2b7d78-...", "task_path": "demo_app.tasks.add_numbers",
+ "queue_name": "default", "priority": 0, "backend_alias": "default",
+ "worker_id": "myhost-5f3a9c21", "status": "SUCCESSFUL", "duration_ms": 1}
+```
+
+The worker's own progress output on stdout is separate and is not JSON; use
+`-v 0` if the log stream should be the only output.
+
 ## Purge Completed Tasks
 
 ```bash
