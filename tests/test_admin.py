@@ -5,6 +5,7 @@ from django.contrib.admin.sites import AdminSite
 from django.contrib.auth.models import User
 from django.tasks.base import TaskResultStatus
 from django.test import RequestFactory
+from django.utils import timezone
 
 from django_database_task.admin import DatabaseTaskAdmin
 from django_database_task.models import DatabaseTask
@@ -218,6 +219,67 @@ class TestRetryFailedTasksAction:
         assert db_task.status == TaskResultStatus.SUCCESSFUL
         # errors_json should be empty since task succeeded
         assert db_task.errors_json == []
+
+
+@pytest.mark.django_db
+class TestRequeueStaleTasksAction:
+    def test_requeue_running_tasks(self, model_admin, request_factory, admin_user):
+        """RUNNING tasks go back to READY without being run here."""
+        result = simple_task.enqueue(1, 2)
+
+        db_task = DatabaseTask.objects.get(id=result.id)
+        db_task.status = TaskResultStatus.RUNNING
+        db_task.started_at = timezone.now()
+        db_task.worker_ids_json = ["worker-1"]
+        db_task.save()
+
+        request = request_factory.post("/admin/")
+        request.user = admin_user
+        request._messages = MockMessages()
+
+        queryset = DatabaseTask.objects.filter(id=result.id)
+        model_admin.requeue_stale_tasks(request, queryset)
+
+        db_task.refresh_from_db()
+        assert db_task.status == TaskResultStatus.READY
+        assert db_task.started_at is None
+        # The workers it was handed to are kept as the attempt count.
+        assert db_task.worker_ids_json == ["worker-1"]
+
+    def test_skip_non_running_tasks(self, model_admin, request_factory, admin_user):
+        """Tasks that are not RUNNING are left alone."""
+        running = simple_task.enqueue(1, 2)
+        ready = simple_task.enqueue(3, 4)
+
+        running_task = DatabaseTask.objects.get(id=running.id)
+        running_task.status = TaskResultStatus.RUNNING
+        running_task.save()
+
+        request = request_factory.post("/admin/")
+        request.user = admin_user
+        request._messages = MockMessages()
+
+        queryset = DatabaseTask.objects.filter(id__in=[running.id, ready.id])
+        model_admin.requeue_stale_tasks(request, queryset)
+
+        assert DatabaseTask.objects.get(id=running.id).status == TaskResultStatus.READY
+        assert DatabaseTask.objects.get(id=ready.id).status == TaskResultStatus.READY
+        assert any("1 skipped" in str(m) for m in request._messages.messages)
+
+    def test_no_running_tasks_warning(self, model_admin, request_factory, admin_user):
+        """Warning message when no RUNNING tasks."""
+        result = simple_task.enqueue(1, 2)
+
+        request = request_factory.post("/admin/")
+        request.user = admin_user
+        request._messages = MockMessages()
+
+        queryset = DatabaseTask.objects.filter(id=result.id)
+        model_admin.requeue_stale_tasks(request, queryset)
+
+        assert any(
+            "No tasks in RUNNING status" in str(m) for m in request._messages.messages
+        )
 
 
 class MockMessages:

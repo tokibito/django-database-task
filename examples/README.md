@@ -365,6 +365,142 @@ puts the demo back on SQLite. Remove the container with:
 docker rm -f ddt-demo-pg
 ```
 
+## Recovering a Task Left in RUNNING
+
+A worker killed with `SIGKILL` never gets to write a result, so the task it was
+running stays in `RUNNING` forever. Here is how to produce that state and
+recover from it.
+
+### 1. Start a long task and kill the worker
+
+```bash
+cd examples
+
+# A task that takes about 20 seconds
+../venv/bin/python manage.py shell -c "
+from demo_app.tasks import process_data
+print(process_data.enqueue(2000).id)
+"
+
+# Start a worker, let it pick the task up, then kill it outright
+../venv/bin/python manage.py run_database_tasks &
+WORKER=$!
+sleep 4
+kill -9 $WORKER
+```
+
+The task is now stranded:
+
+```bash
+../venv/bin/python manage.py shell -c "
+from django_database_task.models import DatabaseTask
+t = DatabaseTask.objects.order_by('-created_at').first()
+print(t.status, t.last_attempted_at, t.worker_ids_json)
+"
+# RUNNING 2026-01-01 12:00:00+00:00 ['myhost-10b3cb8f']
+```
+
+Starting another worker does nothing - a `RUNNING` task is not offered to
+anyone.
+
+### 2. Recover it
+
+```bash
+# See what would happen first
+../venv/bin/python manage.py requeue_stale_database_tasks --older-than 1s --dry-run
+```
+
+```console
+Stale after: 1s
+Mode: requeue (max attempts: 3)
+Found 1 stale tasks
+Dry run mode - nothing was changed (1 would be requeued, 0 would be marked failed)
+```
+
+```bash
+../venv/bin/python manage.py requeue_stale_database_tasks --older-than 1s
+```
+
+```console
+Stale after: 1s
+Mode: requeue (max attempts: 3)
+Found 1 stale tasks
+Requeued 1 tasks, marked 0 as failed
+```
+
+`--older-than 1s` is fine for this demo because you know the worker is dead.
+**In production the threshold has to be longer than your longest task** - a
+task still running when the threshold passes is requeued and ends up running
+twice. See
+[Choosing --older-than](../README.md#choosing---older-than).
+
+### 3. Watch a worker finish it
+
+```bash
+../venv/bin/python manage.py run_database_tasks
+```
+
+```console
+Processing task: 9dbf00aa-... (demo_app.tasks.process_data)
+  Task completed successfully
+```
+
+The task ran from the beginning on the second worker, and both attempts are
+recorded:
+
+```bash
+../venv/bin/python manage.py shell -c "
+from django_database_task.models import DatabaseTask
+t = DatabaseTask.objects.order_by('-created_at').first()
+print(t.status, t.worker_ids_json)
+"
+# SUCCESSFUL ['myhost-10b3cb8f', 'myhost-b92f4fab']
+```
+
+### 4. A task that keeps killing its worker
+
+After `--max-attempts` workers (3 by default) the task is marked `FAILED`
+instead of being handed to a fourth. Fake a task that has used them up:
+
+```bash
+../venv/bin/python manage.py shell -c "
+from datetime import timedelta
+from django.tasks.base import TaskResultStatus
+from django.utils import timezone
+from django_database_task.models import DatabaseTask
+from demo_app.tasks import process_data
+
+t = DatabaseTask.objects.get(id=process_data.enqueue(10).id)
+t.status = TaskResultStatus.RUNNING
+t.last_attempted_at = t.started_at = timezone.now() - timedelta(hours=2)
+t.worker_ids_json = ['w-1', 'w-2', 'w-3']
+t.save()
+"
+
+../venv/bin/python manage.py requeue_stale_database_tasks --older-than 1h
+```
+
+```console
+Found 1 stale tasks
+Requeued 0 tasks, marked 1 as failed
+```
+
+The recorded error says what happened, in the place a traceback would go:
+
+```bash
+../venv/bin/python manage.py shell -c "
+from django_database_task.models import DatabaseTask
+t = DatabaseTask.objects.filter(worker_ids_json=['w-1','w-2','w-3']).first()
+print(t.errors_json[0]['traceback'])
+"
+# django_database_task.exceptions.WorkerLost: demo_app.tasks.process_data was
+# handed to w-3 at ... and was still RUNNING at ..., so the worker is presumed
+# dead. Attempts so far: 3. No exception was raised by the task itself.
+```
+
+Use `--mark-failed` to get this for every stale task, without requeueing
+anything - the right choice for tasks that are not safe to run twice.
+
 ## Purge Completed Tasks
 
 ```bash
