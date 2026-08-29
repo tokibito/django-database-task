@@ -1378,6 +1378,14 @@ TASKS = {
 }
 ```
 
+Three is the list, and it is meant to stay short. A bundled broker is a
+client library, an authentication scheme and a set of service limits to keep
+working for as long as this package exists, and a list that grows with every
+transport someone asks for ends up maintained badly rather than widely.
+Redis, RabbitMQ, NATS, Pub/Sub and the rest are not missing — they are
+written against the base classes below, in your project or in a package of
+its own, and nothing in `django_database_task` has to change to accept one.
+
 ### Custom brokers
 
 A project can attach its own broker to the plain backend with the `BROKER`
