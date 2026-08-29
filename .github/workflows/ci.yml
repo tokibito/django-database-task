@@ -36,6 +36,67 @@ jobs:
         run: |
           pytest tests/ -v
 
+  # The job above runs on SQLite, which has no LISTEN/NOTIFY and no row
+  # locking, so it skips the PostgreSQL integration tests and never
+  # exercises SELECT FOR UPDATE SKIP LOCKED. This one points the same suite
+  # at a real server. Both drivers Django supports are covered: the broker
+  # reads notifications differently on each, and that code cannot be
+  # checked against a stub.
+  test-postgres:
+    runs-on: ubuntu-latest
+    name: test (PostgreSQL, ${{ matrix.driver }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - driver: psycopg 3
+            install: psycopg[binary]>=3.1.12
+          - driver: psycopg2
+            install: psycopg2-binary>=2.9.9
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: django_database_task
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Not the postgres extra: it installs psycopg 3, which Django
+          # picks over psycopg2 whenever both are present, leaving the
+          # psycopg2 leg of this matrix testing psycopg 3 twice.
+          pip install -e ".[dev,cloudtasks,sqs]"
+          pip install "${{ matrix.install }}"
+
+      - name: Run tests
+        env:
+          DJANGO_DATABASE_ENGINE: postgresql
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_DB: django_database_task
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        run: |
+          pytest tests/ -v
+
   lint:
     runs-on: ubuntu-latest
     steps:

@@ -30,12 +30,13 @@ reported as missing. CI installs all of them for the same reason.
 venv/bin/pytest
 ```
 
-A full run reports **no skipped tests**. If you see any, an extra is missing
-from your environment — see above.
-
 Tests use pytest-django with the settings in `tests/settings.py`, on an
 in-memory SQLite database. Neither the Cloud Tasks nor the SQS tests reach the
 network: both stub their client.
+
+Apart from the PostgreSQL integration tests below, a full run reports **no
+skipped tests**. If you see others, an extra is missing from your environment —
+see above.
 
 To run part of the suite:
 
@@ -44,6 +45,33 @@ venv/bin/pytest tests/test_backend.py
 venv/bin/pytest tests/sqs/
 venv/bin/pytest -k "broker and auth"
 ```
+
+### Against PostgreSQL
+
+`tests/postgres/test_listen_notify.py` runs the LISTEN/NOTIFY broker against a
+real server, which is the only way to check that a notification arrives, that
+it arrives on commit and not before, and that the driver hands it over. SQLite
+cannot answer any of that, so on SQLite the module skips.
+
+Point the suite at a server with `DJANGO_DATABASE_ENGINE`:
+
+```bash
+docker run -d --rm --name ddt-postgres \
+    -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=django_database_task \
+    -p 5432:5432 postgres:16
+
+DJANGO_DATABASE_ENGINE=postgresql venv/bin/pytest
+```
+
+The connection details default to that container (`POSTGRES_HOST`,
+`POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD`
+override them). The whole suite runs there, so `SELECT FOR UPDATE SKIP LOCKED`
+is exercised for real too.
+
+CI runs this against both drivers Django supports, psycopg 3 and psycopg2,
+because the broker reads notifications differently on each. To check the
+psycopg2 path locally, install it in an environment that has no psycopg 3:
+Django picks psycopg 3 whenever both are installed.
 
 ## Linting and formatting
 

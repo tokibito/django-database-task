@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from django_database_task.postgres import PostgresNotifyBroker
 
-from .conftest import FakeDjangoConnection, FakeListenConnection
+from .conftest import FakeDjangoConnection, FakeListenConnection, make_task_result
 
 
 def make_broker(connections, listen_connection=None, **options):
@@ -22,17 +22,6 @@ def make_broker(connections, listen_connection=None, **options):
     if listen_connection is not None:
         broker.connect = lambda: listen_connection
     return broker
-
-
-def make_task_result(
-    task_id="3f2a9c11-0000-4000-8000-000000000000", queue_name="default", run_after=None
-):
-    """A stand-in for the TaskResult the backend hands to the broker."""
-    result = MagicMock()
-    result.id = task_id
-    result.task.queue_name = queue_name
-    result.task.run_after = run_after
-    return result
 
 
 class TestPostgresNotifyBrokerInit:
