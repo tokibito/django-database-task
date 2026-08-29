@@ -115,7 +115,7 @@ of the base classes in `django_database_task/brokers/base.py`:
 | Base class | For |
 |------------|-----|
 | `HTTPPushBroker` | Services that call an HTTP endpoint of the application, like Cloud Tasks |
-| `PullBroker` | Services a worker receives from, like SQS |
+| `PullBroker` | Services a worker receives from, like SQS or PostgreSQL LISTEN/NOTIFY |
 | `TaskBroker` | Anything else |
 
 `django_database_task/sqs/` is the smallest complete example: a broker, a thin

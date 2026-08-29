@@ -84,6 +84,7 @@ cd examples
 
 The demo runs on the plain database backend by default. Set `DEMO_BROKER=sqs`
 to run it against Amazon SQS instead, with a local mock standing in for AWS.
+It stays on SQLite; only the broker changes.
 
 ### 1. Start a local SQS
 
@@ -202,6 +203,167 @@ it is due — which is why the worker should be left running with `--continuous`
 ### Back to the database backend
 
 Unset `DEMO_BROKER`, or set it to anything other than `sqs`.
+
+## Trying the PostgreSQL LISTEN/NOTIFY broker
+
+The demo runs on the plain database backend and SQLite by default. Set
+`DEMO_BROKER=postgres` to run it against PostgreSQL instead, where saving a
+task notifies a channel and the worker starts it at once rather than on the
+next poll.
+
+Unlike the SQS walkthrough, this one needs a PostgreSQL database — the
+notification travels through the same connection the tasks are stored in.
+
+### 1. Start a PostgreSQL
+
+```bash
+docker run -d --name ddt-demo-pg \
+    -e POSTGRES_USER=demo -e POSTGRES_PASSWORD=demo -e POSTGRES_DB=demo \
+    -p 55432:5432 postgres:16-alpine
+```
+
+Port 55432 is the default the demo settings look for, so it does not collide
+with a PostgreSQL you may already be running on 5432. Override it, and the
+rest of the connection, with `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`,
+`POSTGRES_USER` and `POSTGRES_PASSWORD`.
+
+Install a driver if the environment has none:
+
+```bash
+pip install "psycopg[binary]"
+```
+
+### 2. Create the tables
+
+The demo keeps its PostgreSQL data separate from the SQLite file, so migrate
+again:
+
+```bash
+DEMO_BROKER=postgres python manage.py migrate
+```
+
+### 3. Start the worker
+
+```bash
+DEMO_BROKER=postgres python manage.py run_database_tasks --continuous
+```
+
+```
+Worker ID: myhost-3f9c2a10
+Backend: default
+Source: both
+Continuous mode: interval=5.0s
+Broker: PostgresNotifyBroker (wait=20.0s, max_messages=1)
+Graceful shutdown: enabled (timeout=unlimited)
+```
+
+`Source: both` is the default for a backend with a broker a worker can wait
+on: the worker waits on the channel *and* sweeps the database, which is what
+runs the deferred tasks below.
+
+### 4. Enqueue a task
+
+In another terminal:
+
+```bash
+DEMO_BROKER=postgres python manage.py shell
+```
+
+```python
+from demo_app.tasks import add_numbers
+add_numbers.enqueue(21, 21)
+```
+
+The worker prints the task within milliseconds — there is no polling interval
+to wait out:
+
+```
+Processing task from broker: e90e87dc-b1cd-4976-933c-69604f097c9f
+  Task completed successfully
+```
+
+Start the web server with `DEMO_BROKER=postgres python manage.py runserver`
+and the demo pages enqueue through the broker too.
+
+### It only fires on commit
+
+`pg_notify()` runs inside the transaction that inserted the task, so the
+notification is delivered when that transaction commits and not before:
+
+```python
+from django.db import transaction
+from demo_app.tasks import add_numbers
+
+with transaction.atomic():
+    result = add_numbers.enqueue(1, 2)
+    input("the worker has not been told yet — press Enter to commit")
+```
+
+The worker stays quiet until the block exits, then runs the task at once. Roll
+the transaction back instead and it is never told at all, because the task is
+no longer there.
+
+### Broadcast, not a queue
+
+Start a second worker in another terminal and enqueue a task. Both receive the
+notification, both go for the task, and one of them reports:
+
+```
+Processing task from broker: b1352efb-2907-4d07-93ee-d9d4f646720d
+  Task is not ready to run; nothing to do
+```
+
+That is the loser of the race finding the task already taken by the `READY`
+check and the row lock. Nothing runs twice; the wasted query is the cost of a
+broadcast channel.
+
+### Queues
+
+A worker started with `--queue` receives every notification and keeps only the
+ones for its queue:
+
+```bash
+DEMO_BROKER=postgres python manage.py run_database_tasks --queue emails --continuous
+```
+
+```python
+from demo_app.tasks import newsletter_task
+newsletter_task.enqueue(100)
+```
+
+### Deferred tasks
+
+A notification cannot be held back, so a task with a future `run_after` is not
+announced at all — a worker acting on it would run the task early:
+
+```python
+from datetime import timedelta
+from django.utils import timezone
+from demo_app.tasks import add_numbers
+
+add_numbers.using(run_after=timezone.now() + timedelta(seconds=30)).enqueue(3, 4)
+```
+
+The worker stays quiet, then runs it from the database sweep once it is due.
+The sweep happens when the wait on the channel times out, so the task can be
+up to `--wait-time` seconds (20 by default) late. Lower it to see the
+difference:
+
+```bash
+DEMO_BROKER=postgres python manage.py run_database_tasks --continuous --wait-time 2
+```
+
+The same sweep is what runs tasks enqueued while no worker was connected: a
+notification only reaches whoever is listening at that moment.
+
+### Back to the database backend
+
+Unset `DEMO_BROKER`, or set it to anything other than `postgres`, which also
+puts the demo back on SQLite. Remove the container with:
+
+```bash
+docker rm -f ddt-demo-pg
+```
 
 ## Purge Completed Tasks
 

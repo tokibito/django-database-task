@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **PostgreSQL LISTEN/NOTIFY broker**
+  (`django_database_task.postgres.PostgresNotifyDatabaseBackend`). Notifies a
+  channel of the database the tasks are already stored in, so a waiting worker
+  starts the task in milliseconds instead of on the next poll. It needs no
+  queue, no credentials and no extra service — only the PostgreSQL connection
+  the project already has.
+- The notification is sent with `pg_notify()` on the connection that inserted
+  the task and inside the same transaction, so PostgreSQL delivers it on
+  commit. A worker is never told about a task it cannot yet see, or one whose
+  transaction was rolled back.
+- A `postgres` extra, for a project that has not installed a PostgreSQL driver
+  yet. psycopg 3 and psycopg2 both work.
+
 ## 0.4.0
 
 Brokers — the services that trigger execution of a saved task — are now

@@ -29,7 +29,7 @@ jobs:
           python -m pip install --upgrade pip
           # The optional extras are installed so their tests run instead
           # of being skipped by their importorskip guards.
-          pip install -e ".[dev,cloudtasks,sqs]"
+          pip install -e ".[dev,cloudtasks,sqs,postgres]"
           pip install "Django~=${{ matrix.django-version }}.0"
 
       - name: Run tests
