@@ -15,20 +15,20 @@ from tests.tasks import simple_task
 
 
 class RecordingBroker(TaskBroker):
-    """A broker that records what it was asked to enqueue."""
+    """A broker that records what it was asked to notify about."""
 
     def __init__(self, backend, options=None):
         super().__init__(backend, options)
-        self.enqueued = []
+        self.notified = []
 
-    def enqueue(self, task_result):
-        self.enqueued.append(task_result)
+    def notify(self, task_result):
+        self.notified.append(task_result)
 
 
 class FailingBroker(TaskBroker):
     """A broker that is always down."""
 
-    def enqueue(self, task_result):
+    def notify(self, task_result):
         raise RuntimeError("broker is down")
 
 
@@ -86,19 +86,19 @@ class TestBrokerSelection:
 class TestNotifyBroker:
     """Tests for notifying the broker when a task is saved."""
 
-    def test_enqueue_notifies_the_broker(self):
+    def test_saving_a_task_notifies_the_broker(self):
         backend = make_backend(BROKER=RecordingBroker)
 
         result = backend.enqueue(simple_task, (1, 2), {})
 
-        assert [r.id for r in backend.broker.enqueued] == [result.id]
+        assert [r.id for r in backend.broker.notified] == [result.id]
 
     def test_the_task_is_saved_before_the_broker_is_told(self):
         """The broker only carries an id, so the row has to exist first."""
         seen = []
 
         class CheckingBroker(TaskBroker):
-            def enqueue(self, task_result):
+            def notify(self, task_result):
                 seen.append(DatabaseTask.objects.filter(id=task_result.id).exists())
 
         backend = make_backend(BROKER=CheckingBroker)
@@ -113,15 +113,66 @@ class TestNotifyBroker:
         result = backend.enqueue(simple_task, (1, 2), {})
 
         assert DatabaseTask.objects.get(id=result.id).status == "READY"
-        assert "FailingBroker failed to enqueue task" in caplog.text
+        assert "FailingBroker failed to notify about task" in caplog.text
         assert "broker is down" in caplog.text
 
-    def test_enqueue_works_without_a_broker(self):
+    def test_saving_a_task_works_without_a_broker(self):
         backend = make_backend()
 
         result = backend.enqueue(simple_task, (1, 2), {})
 
         assert DatabaseTask.objects.filter(id=result.id).exists()
+
+
+@pytest.mark.django_db
+class TestDeprecatedEnqueue:
+    """Tests for brokers written against the 0.4 method name."""
+
+    def test_an_override_is_still_called_and_warns(self):
+        """A broker with enqueue() keeps being told, rather than going quiet."""
+        notified = []
+
+        class LegacyBroker(TaskBroker):
+            def enqueue(self, task_result):
+                notified.append(task_result)
+
+        backend = make_backend(BROKER=LegacyBroker)
+
+        with pytest.warns(DeprecationWarning, match="enqueue"):
+            result = backend.enqueue(simple_task, (1, 2), {})
+
+        assert [r.id for r in notified] == [result.id]
+
+    def test_the_warning_is_emitted_once_per_backend(self, recwarn):
+        class LegacyBroker(TaskBroker):
+            def enqueue(self, task_result):
+                pass
+
+        backend = make_backend(BROKER=LegacyBroker)
+        backend.enqueue(simple_task, (1, 2), {})
+        backend.enqueue(simple_task, (1, 2), {})
+
+        assert (
+            len([w for w in recwarn.list if issubclass(w.category, DeprecationWarning)])
+            == 1
+        )
+
+    def test_a_broker_on_the_new_name_does_not_warn(self, recwarn):
+        backend = make_backend(BROKER=RecordingBroker)
+
+        backend.enqueue(simple_task, (1, 2), {})
+
+        assert [
+            w for w in recwarn.list if issubclass(w.category, DeprecationWarning)
+        ] == []
+
+    def test_the_inherited_alias_still_works(self):
+        """Calling broker.enqueue() by hand reaches notify()."""
+        broker = RecordingBroker(backend=None)
+
+        broker.enqueue("task-result")
+
+        assert broker.notified == ["task-result"]
 
 
 class TestBrokerAuthHandlers:
@@ -167,9 +218,9 @@ class TestBrokerAuthHandlers:
 class TestBaseClasses:
     """Tests for the contract the base classes define."""
 
-    def test_task_broker_requires_enqueue(self):
-        with pytest.raises(NotImplementedError, match="must implement enqueue"):
-            TaskBroker(backend=None).enqueue(None)
+    def test_task_broker_requires_notify(self):
+        with pytest.raises(NotImplementedError, match="must implement notify"):
+            TaskBroker(backend=None).notify(None)
 
     def test_queue_names_pass_through_by_default(self):
         assert TaskBroker(backend=None).resolve_queue("ranking") == "ranking"

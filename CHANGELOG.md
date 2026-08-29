@@ -53,6 +53,23 @@
   systemd unit samples for both the timer-driven and the long-running shape,
   and a `LOGGING` configuration that produces JSON.
 
+### Changed
+
+- A broker's `enqueue()` method is now called `notify()`. The old name read as
+  if it enqueued the task, which is the backend's job: a broker is only told
+  about a task the database already holds, and carries nothing but its id. The
+  new name matches what the method does, what `notify_broker()` is called and
+  what every broker docstring already said.
+- The log record for a broker failure now reads `Broker X failed to notify
+  about task Y`, in place of `failed to enqueue task`.
+
+### Deprecated
+
+- `TaskBroker.enqueue()`. A broker that overrides it is still called, with a
+  `DeprecationWarning`, and stops being called in 0.6. Rename it to `notify()`.
+  Bundled brokers and the `BROKER` option are unaffected; only a broker written
+  by hand against 0.4 needs the change.
+
 ## 0.4.0
 
 Brokers — the services that trigger execution of a saved task — are now

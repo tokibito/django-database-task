@@ -63,7 +63,7 @@ class TestPostgresNotifyBrokerEnqueue:
     def test_sends_the_task_id(self, connections, django_connection):
         broker = make_broker(connections)
 
-        broker.enqueue(make_task_result(task_id="abc-123"))
+        broker.notify(make_task_result(task_id="abc-123"))
 
         sql, params = django_connection.executed[0]
         assert sql == "SELECT pg_notify(%s, %s)"
@@ -73,7 +73,7 @@ class TestPostgresNotifyBrokerEnqueue:
     def test_sends_the_queue_name(self, connections, django_connection):
         broker = make_broker(connections)
 
-        broker.enqueue(make_task_result(queue_name="ranking"))
+        broker.notify(make_task_result(queue_name="ranking"))
 
         _sql, params = django_connection.executed[0]
         assert json.loads(params[1])["queue_name"] == "ranking"
@@ -81,7 +81,7 @@ class TestPostgresNotifyBrokerEnqueue:
     def test_notifies_the_configured_channel(self, connections, django_connection):
         broker = make_broker(connections, CHANNEL="tasks")
 
-        broker.enqueue(make_task_result())
+        broker.notify(make_task_result())
 
         _sql, params = django_connection.executed[0]
         assert params[0] == "tasks"
@@ -89,7 +89,7 @@ class TestPostgresNotifyBrokerEnqueue:
     def test_a_task_due_now_is_notified(self, connections, django_connection):
         broker = make_broker(connections)
 
-        payload = broker.enqueue(
+        payload = broker.notify(
             make_task_result(run_after=timezone.now() - timedelta(minutes=1))
         )
 
@@ -102,7 +102,7 @@ class TestPostgresNotifyBrokerEnqueue:
         """A notification cannot be held back, so it would run the task early."""
         broker = make_broker(connections)
 
-        payload = broker.enqueue(
+        payload = broker.notify(
             make_task_result(run_after=timezone.now() + timedelta(hours=3))
         )
 

@@ -107,12 +107,12 @@ class TestDelivery:
     """Tests for a message travelling from enqueue() to receive()."""
 
     def test_a_sent_message_comes_back(self, broker):
-        broker.enqueue(make_task_result(task_id="abc-123"))
+        broker.notify(make_task_result(task_id="abc-123"))
 
         assert task_ids(broker.receive(wait_seconds=WAIT)) == ["abc-123"]
 
     def test_the_body_carries_the_task_id_and_nothing_else(self, broker):
-        broker.enqueue(make_task_result(task_id="abc-123"))
+        broker.notify(make_task_result(task_id="abc-123"))
 
         message = broker.receive(wait_seconds=WAIT)[0]
 
@@ -122,7 +122,7 @@ class TestDelivery:
         assert broker.receive(wait_seconds=0) == []
 
     def test_each_queue_keeps_its_own_messages(self, broker):
-        broker.enqueue(make_task_result(task_id="ranked", queue_name="ranking"))
+        broker.notify(make_task_result(task_id="ranked", queue_name="ranking"))
 
         assert broker.receive(queue_name="default", wait_seconds=0) == []
         assert task_ids(broker.receive(queue_name="ranking", wait_seconds=WAIT)) == [
@@ -145,7 +145,7 @@ class TestAcknowledgement:
     """Tests for what a queue does with a message the worker took."""
 
     def test_an_acked_message_is_not_handed_over_again(self, broker):
-        broker.enqueue(make_task_result(task_id="acked"))
+        broker.notify(make_task_result(task_id="acked"))
 
         broker.ack(broker.receive(wait_seconds=WAIT)[0])
         time.sleep(VISIBILITY_TIMEOUT + 0.5)
@@ -154,7 +154,7 @@ class TestAcknowledgement:
 
     def test_a_message_the_worker_died_on_comes_back(self, broker):
         """Nothing acknowledges it, so the visibility timeout returns it."""
-        broker.enqueue(make_task_result(task_id="unacked"))
+        broker.notify(make_task_result(task_id="unacked"))
 
         broker.receive(wait_seconds=WAIT)
         time.sleep(VISIBILITY_TIMEOUT + 0.5)
@@ -162,7 +162,7 @@ class TestAcknowledgement:
         assert task_ids(broker.receive(wait_seconds=WAIT)) == ["unacked"]
 
     def test_nack_hands_it_back_at_once(self, broker):
-        broker.enqueue(make_task_result(task_id="nacked"))
+        broker.notify(make_task_result(task_id="nacked"))
 
         broker.nack(broker.receive(wait_seconds=WAIT)[0])
 
@@ -186,7 +186,7 @@ class TestDeferredTasks:
     def test_a_delayed_task_is_held_back_and_then_delivered(self, broker):
         run_after = timezone.now() + timedelta(seconds=2)
 
-        broker.enqueue(make_task_result(task_id="delayed", run_after=run_after))
+        broker.notify(make_task_result(task_id="delayed", run_after=run_after))
 
         assert broker.receive(wait_seconds=0) == []
         assert task_ids(broker.receive(wait_seconds=WAIT)) == ["delayed"]
@@ -194,7 +194,7 @@ class TestDeferredTasks:
     def test_a_task_deferred_past_the_limit_is_never_sent(self, broker):
         run_after = timezone.now() + timedelta(hours=1)
 
-        assert broker.enqueue(make_task_result(run_after=run_after)) is None
+        assert broker.notify(make_task_result(run_after=run_after)) is None
         assert broker.receive(wait_seconds=0) == []
 
 
@@ -203,13 +203,13 @@ class TestLimits:
 
     def test_a_wait_longer_than_sqs_allows_is_accepted(self, broker):
         """SQS rejects WaitTimeSeconds above 20."""
-        broker.enqueue(make_task_result(task_id="clamped-wait"))
+        broker.notify(make_task_result(task_id="clamped-wait"))
 
         assert task_ids(broker.receive(wait_seconds=600)) == ["clamped-wait"]
 
     def test_asking_for_more_messages_than_sqs_allows_is_accepted(self, broker):
         """SQS rejects MaxNumberOfMessages above 10."""
-        broker.enqueue(make_task_result(task_id="clamped-count"))
+        broker.notify(make_task_result(task_id="clamped-count"))
 
         assert task_ids(broker.receive(max_messages=100, wait_seconds=WAIT)) == [
             "clamped-count"

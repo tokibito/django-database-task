@@ -138,7 +138,7 @@ class SQSBroker(PullBroker):
             return None
         return int(delay)
 
-    def enqueue(self, task_result):
+    def notify(self, task_result):
         """
         Send a message naming a task that was just saved.
 

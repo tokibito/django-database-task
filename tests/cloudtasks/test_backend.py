@@ -173,7 +173,7 @@ class TestCloudTasksDatabaseBackendEnqueue:
         assert result.id is not None
 
         # Error should be logged, with the traceback
-        assert "CloudTasksBroker failed to enqueue task" in caplog.text
+        assert "CloudTasksBroker failed to notify about task" in caplog.text
         assert "API Error" in caplog.text
 
 
