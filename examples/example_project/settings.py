@@ -59,12 +59,31 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "example_project.wsgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+# The demo runs on the plain database backend and SQLite by default. Set
+# DEMO_BROKER to try a broker instead; see examples/README.md.
+#
+#   sqs       Amazon SQS, against LocalStack (stays on SQLite)
+#   postgres  PostgreSQL LISTEN/NOTIFY, which needs a PostgreSQL database
+DEMO_BROKER = os.environ.get("DEMO_BROKER", "database")
+
+if DEMO_BROKER == "postgres":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("POSTGRES_DB", "demo"),
+            "USER": os.environ.get("POSTGRES_USER", "demo"),
+            "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "demo"),
+            "HOST": os.environ.get("POSTGRES_HOST", "127.0.0.1"),
+            "PORT": os.environ.get("POSTGRES_PORT", "55432"),
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 LANGUAGE_CODE = "ja"
 
@@ -78,12 +97,7 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Task backend settings
-#
-# The demo runs on the plain database backend by default. Set
-# DEMO_BROKER=sqs to try the SQS broker against LocalStack instead; see
-# the "Trying the SQS broker" section of examples/README.md.
-DEMO_BROKER = os.environ.get("DEMO_BROKER", "database")
+# Task backend settings, chosen by the DEMO_BROKER set above.
 
 if DEMO_BROKER == "sqs":
     TASKS = {
@@ -96,6 +110,17 @@ if DEMO_BROKER == "sqs":
                 "SQS_ENDPOINT_URL": os.environ.get(
                     "SQS_ENDPOINT_URL", "http://localhost:4566"
                 ),
+            },
+        },
+    }
+elif DEMO_BROKER == "postgres":
+    TASKS = {
+        "default": {
+            "BACKEND": "django_database_task.postgres.PostgresNotifyDatabaseBackend",
+            "QUEUES": [],
+            "OPTIONS": {
+                # The default; named here to show where it goes.
+                "CHANNEL": "django_database_task",
             },
         },
     }

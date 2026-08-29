@@ -50,6 +50,12 @@ cloudtasks = [
 sqs = [
     "boto3>=1.28",
 ]
+# The PostgreSQL broker needs no more than the driver Django already uses
+# to reach a PostgreSQL database; this extra is for a project that has not
+# picked one yet. psycopg2 works too.
+postgres = [
+    "psycopg[binary]>=3.1.12",
+]
 dev = [
     "pytest>=7.0",
     "pytest-django>=4.5",

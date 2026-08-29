@@ -16,6 +16,7 @@ A database-backed task queue backend for Django's built-in task framework.
 - **Django Admin integration** - View and manage tasks from the admin interface
 - **Async support** - Supports async task functions
 - **Graceful shutdown** - Workers finish the running task before exiting on `SIGTERM`
+- **Instant pickup on PostgreSQL** - Optional `LISTEN`/`NOTIFY` broker that wakes the worker the moment a task is saved, with no extra service to run
 - **Google Cloud Tasks integration** - Optional backend for GAE/Cloud Run with auto-detection
 
 ## Architecture
@@ -80,6 +81,8 @@ pip install django-database-task
 # With a broker (see Task Brokers)
 pip install django-database-task[cloudtasks]
 pip install django-database-task[sqs]
+
+# The PostgreSQL broker needs no extra: it uses the driver you already have
 ```
 
 ## Quick Start
@@ -287,7 +290,10 @@ worker as soon as it arrives. `SIGTERM` is still honoured — see
 A message is acknowledged whenever redelivering it would not help: the task
 ran (whether it succeeded or failed), it no longer exists, or another worker
 already holds it. If the worker itself cannot run the task, the message is
-returned to the broker instead, to be delivered again.
+returned to the broker instead, to be delivered again. A broker that cannot
+redeliver — [PostgreSQL LISTEN/NOTIFY](#postgresql-listennotify-integration)
+has no such thing — does nothing in either case, and leans on the database
+sweep instead.
 
 #### Output verbosity
 
@@ -942,11 +948,12 @@ available and become the **fallback when the broker is down**: a broker
 failure is logged and the task is left `READY` in the database, so the next
 worker run or endpoint call picks it up.
 
-Two brokers are bundled. Each has a backend that attaches it, so naming the
+Three brokers are bundled. Each has a backend that attaches it, so naming the
 backend is all a project has to do:
 
 | Broker | Backend | Shape |
 |--------|---------|-------|
+| [PostgreSQL LISTEN/NOTIFY](#postgresql-listennotify-integration) | `django_database_task.postgres.PostgresNotifyDatabaseBackend` | Pull: a worker waits on a channel of the database it already uses |
 | [Cloud Tasks](#google-cloud-tasks-integration) | `django_database_task.cloudtasks.CloudTasksDatabaseBackend` | Push: calls an [HTTP endpoint](#http-endpoints-optional) of your app |
 | [Amazon SQS](#amazon-sqs-integration) | `django_database_task.sqs.SQSDatabaseBackend` | Pull: a worker receives from the queue |
 
@@ -994,7 +1001,203 @@ class MyBroker(HTTPPushBroker):
 |------------|---------|
 | `TaskBroker` | Anything else |
 | `HTTPPushBroker` | Services that call an HTTP endpoint of your app (Cloud Tasks). Provides `get_handler_url()`, `TASK_HANDLER_URL` and `TASK_HANDLER_PATH` |
-| `PullBroker` | Services a worker polls. Defines `receive()`, `ack()` and `nack()` |
+| `PullBroker` | Services a worker waits on (SQS, PostgreSQL LISTEN/NOTIFY). Defines `receive()`, `ack()` and `nack()` |
+
+## PostgreSQL LISTEN/NOTIFY Integration
+
+Wake the worker the moment a task is saved, using the PostgreSQL connection
+the project already has. There is no queue to create, no credentials to hand
+out and no extra service to run — the notification travels through the same
+database the task is stored in.
+
+This is the broker to reach for when the database backend is already doing the
+job and only the polling delay is in the way: `--interval 5` means a task can
+sit for five seconds before a worker looks; a notification is picked up in
+milliseconds.
+
+### Installation
+
+Nothing beyond the PostgreSQL driver Django already needs. The `postgres`
+extra installs psycopg 3 for a project that has not picked one yet, and
+psycopg2 works just as well:
+
+```bash
+pip install django-database-task[postgres]
+```
+
+### Quick Setup
+
+```python
+# settings.py
+TASKS = {
+    "default": {
+        "BACKEND": "django_database_task.postgres.PostgresNotifyDatabaseBackend",
+        "QUEUES": [],  # Allow all queue names
+    },
+}
+```
+
+```bash
+python manage.py run_database_tasks --continuous
+```
+
+That is the same worker command as always. With this broker configured it
+waits on the channel and sweeps the database, because `--source` defaults to
+`auto`. See [Task sources](#task-sources).
+
+### How It Works
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant Backend as PostgresNotifyDatabaseBackend
+    participant DB as PostgreSQL
+    participant Worker as Worker Process
+
+    Note over Worker,DB: The worker holds an idle connection open
+    Worker->>DB: LISTEN django_database_task
+
+    Note over App,Worker: Task Enqueue
+    App->>Backend: task.enqueue(args, kwargs)
+    Backend->>DB: INSERT task (status=READY)
+    alt No run_after, or already due
+        Backend->>DB: SELECT pg_notify(channel,<br/>task_id + queue_name)
+        Note over Backend,DB: Same connection, same transaction<br/>as the INSERT
+    else Deferred to a later time
+        Note over Backend,DB: Not notified. The task waits in the<br/>database for the sweep below
+    end
+    Backend-->>App: TaskResult (id, status=READY)
+    Note over DB: The notification is delivered on COMMIT
+
+    Note over App,Worker: Task Execution
+    loop run_database_tasks --continuous
+        DB-->>Worker: Notification (task_id, queue_name)
+        alt A notification arrives
+            Worker->>DB: SELECT FOR UPDATE SKIP LOCKED<br/>(id=task_id, status=READY)
+            Worker->>DB: UPDATE status=RUNNING
+            Worker->>Worker: Execute task function
+            Worker->>DB: UPDATE status=SUCCESSFUL / FAILED
+        else The wait times out
+            Worker->>DB: SELECT FOR UPDATE SKIP LOCKED<br/>(status=READY, run_after <= now)
+            Worker->>Worker: Execute task function
+            Worker->>DB: UPDATE status=SUCCESSFUL / FAILED
+        end
+    end
+```
+
+The notification carries only the task id and its queue name, the same as with
+the other brokers. What that buys here:
+
+- **The notification is transactional.** `pg_notify()` runs on the connection
+  that inserted the task and inside the same transaction, so PostgreSQL
+  delivers it when — and only when — that transaction commits. A worker never
+  hears about a task it cannot yet see, and never hears about one whose
+  transaction was rolled back. That is a guarantee an external broker cannot
+  give: SQS or Cloud Tasks are told before the commit and can hand the id over
+  first
+- **The listening connection buffers.** `LISTEN` stays in effect between
+  calls, so notifications that arrive while the worker is busy with a task are
+  waiting for it when it comes back
+- **Notifications are broadcast, not queued.** Every listening worker receives
+  every notification and races for the task; the losers find it already taken
+  by the `READY` check and the row lock, and report `Task is not ready to run`.
+  Nothing runs twice, but each worker does one wasted query per task, so this
+  broker suits a handful of workers rather than dozens
+- **There is nothing to acknowledge.** A notification is never redelivered, so
+  `ack()` and `nack()` do nothing. A worker that dies mid-task leaves the task
+  behind in `RUNNING` — see
+  [Tasks left in RUNNING status](#tasks-left-in-running-status)
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `CHANNEL` | Name of the channel to notify and listen on (default: `django_database_task`). PostgreSQL limits it to 63 bytes |
+| `DATABASE` | Alias of the database connection to use. Defaults to the one the task rows are written to |
+
+### The database sweep is not optional here
+
+A notification only reaches the workers listening **at that moment**. A task
+saved while no worker was connected — during a deploy, a restart, or a
+connection drop — is never announced to anyone. So is a deferred one:
+
+```python
+send_report.using(run_after=timezone.now() + timedelta(hours=3)).enqueue()
+```
+
+A notification cannot be held back, and a worker acting on one would run the
+task three hours early, so a task with a future `run_after` is not notified at
+all.
+
+Both are covered by the database sweep the worker already performs, which is
+why `--source` resolves to `both` rather than `broker`, and why the worker
+should be left running with `--continuous`. The same sweep recovers tasks the
+`pg_notify()` call never reached, since a broker failure during `enqueue()` is
+logged and swallowed.
+
+The sweep runs when the wait on the channel times out, so `--wait-time`
+(default 20 seconds) is how late a task the notification missed can be. Lower
+it if deferred tasks need tighter timing:
+
+```bash
+python manage.py run_database_tasks --continuous --wait-time 5
+```
+
+### Queues
+
+One channel carries every queue, because `LISTEN` has no wildcard and a worker
+started without `--queue` has no list of queue names to listen on. The queue
+name travels in the payload instead, and a worker started with `--queue`
+ignores the notifications for the other queues:
+
+```python
+@task(queue_name="ranking")
+def rebuild_ranking(tenant_id):
+    ...
+```
+
+```bash
+python manage.py run_database_tasks --queue ranking --continuous
+```
+
+That worker still receives every notification and discards most of them, which
+costs nothing but is worth knowing. To keep the queues genuinely apart, give
+each its own channel by configuring a backend per queue:
+
+```python
+TASKS = {
+    "default": {
+        "BACKEND": "django_database_task.postgres.PostgresNotifyDatabaseBackend",
+    },
+    "ranking": {
+        "BACKEND": "django_database_task.postgres.PostgresNotifyDatabaseBackend",
+        "OPTIONS": {"CHANNEL": "tasks_ranking"},
+    },
+}
+```
+
+```bash
+python manage.py run_database_tasks --backend ranking --continuous
+```
+
+### Operational notes
+
+- **Each worker holds a second connection open**, separate from the one Django
+  runs queries on, because it has to sit idle in autocommit waiting for
+  notifications. Count it when sizing `max_connections` or a connection pooler
+- **A pooler has to be in session mode.** `LISTEN` belongs to a session, so
+  PgBouncer in transaction or statement mode drops it. Point the worker at the
+  database directly, or use a session-mode pool. The `DATABASE` option is there
+  for that: give the worker a second alias in `DATABASES` that bypasses the
+  pooler
+- **The connection recovers itself.** If it drops, the error is reported and
+  the next pass reconnects and starts listening again; whatever was missed in
+  between is picked up by the database sweep
+- **`SIGTERM` is honoured while waiting.** The wait is taken in short steps, so
+  a worker asked to stop mid-wait exits within about a second rather than
+  sitting out the full `--wait-time`
+- **Only PostgreSQL.** The backend refuses to start on any other database with
+  an `ImproperlyConfigured` naming the connection it was pointed at
 
 ## Google Cloud Tasks Integration
 
