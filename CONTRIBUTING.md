@@ -150,6 +150,16 @@ of the base classes in `django_database_task/brokers/base.py`:
 | `PullBroker` | Services a worker receives from, like SQS or PostgreSQL LISTEN/NOTIFY |
 | `TaskBroker` | Anything else |
 
+Most brokers belong in a package of their own rather than in this one. The
+`BROKER` option takes a dotted path, so a broker maintained outside the
+repository is configured exactly like a bundled one and needs nothing from a
+release here.
+
+Open an issue before writing one for this repository. A bundled broker is a
+client library, an authentication scheme and a set of service limits to keep
+working for as long as the package exists, so the three that are here were a
+deliberate choice rather than the start of a collection.
+
 `django_database_task/sqs/` is the smallest complete example: a broker, a thin
 backend that attaches it, environment detection and an extra in
 `pyproject.toml`. A broker that needs a third-party client belongs behind an
