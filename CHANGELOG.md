@@ -34,6 +34,24 @@
   transaction was rolled back.
 - A `postgres` extra, for a project that has not installed a PostgreSQL driver
   yet. psycopg 3 and psycopg2 both work.
+- **Exit codes for job schedulers**: `run_database_tasks --empty-exit-code` and
+  `--failed-exit-code`. An on-premise scheduler (JP1, Hinemos, Rundeck, cron, a
+  systemd timer) decides what happened from the exit code, and the command
+  previously exited 0 whether it drained the queue, found nothing, or ran a
+  task that failed. Both options default to 0, so nothing changes for an
+  existing `cron` line or Kubernetes `Job` until they are set. A failed task
+  outranks an idle run; a broker that could not be reached is neither.
+- **Structured log fields.** The library's log records now carry their context
+  as attributes — `task_id`, `task_path`, `queue_name`, `priority`,
+  `backend_alias`, `worker_id`, plus `status`, `duration_ms` and `error_class`
+  where they apply — instead of only interpolating it into the message. A JSON
+  formatter now emits fields an operator can filter on. `Task started`,
+  `Worker started` and `Worker finished` records are new; the last carries
+  `tasks_processed`, `tasks_failed` and `exit_code`.
+- Documentation for running the worker from a job scheduler: the exit code
+  table, `flock` for keeping a slow run from being overlapped by the next one,
+  systemd unit samples for both the timer-driven and the long-running shape,
+  and a `LOGGING` configuration that produces JSON.
 
 ## 0.4.0
 

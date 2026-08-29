@@ -796,3 +796,162 @@ class TestBrokerLifecycle:
         output = run_worker(make_backend(UnclosableBroker()), source="broker")
 
         assert "Error closing the broker" in output
+
+
+@pytest.mark.django_db
+class TestExitCodes:
+    """Tests for the exit codes a job scheduler reads."""
+
+    def test_no_exit_code_by_default(self):
+        """Without the options an empty run still exits normally."""
+        call_command("run_database_tasks", stdout=StringIO())
+
+    def test_failed_task_exits_normally_by_default(self):
+        """A failed task does not change the exit code on its own."""
+        failing_task.enqueue()
+
+        call_command("run_database_tasks", stdout=StringIO())
+
+    def test_empty_exit_code_used_when_nothing_ran(self):
+        """An idle run reports the code the scheduler was given."""
+        with pytest.raises(SystemExit) as exc_info:
+            call_command("run_database_tasks", empty_exit_code=4, stdout=StringIO())
+
+        assert exc_info.value.code == 4
+
+    def test_empty_exit_code_not_used_when_a_task_ran(self):
+        """Processing anything at all makes the run a normal one."""
+        simple_task.enqueue(1, 2)
+
+        call_command("run_database_tasks", empty_exit_code=4, stdout=StringIO())
+
+    def test_failed_exit_code_used_when_a_task_failed(self):
+        failing_task.enqueue()
+
+        with pytest.raises(SystemExit) as exc_info:
+            call_command("run_database_tasks", failed_exit_code=5, stdout=StringIO())
+
+        assert exc_info.value.code == 5
+
+    def test_failed_exit_code_not_used_when_every_task_succeeded(self):
+        simple_task.enqueue(1, 2)
+
+        call_command("run_database_tasks", failed_exit_code=5, stdout=StringIO())
+
+    def test_a_task_the_worker_could_not_run_counts_as_failed(self):
+        """
+        The task never gets as far as running -- its code cannot be
+        imported -- so nothing records it as FAILED except the worker.
+        """
+        simple_task.enqueue(1, 2)
+
+        with patch.object(
+            DatabaseTaskBackend, "_resolve_task", side_effect=ImportError("gone")
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                call_command(
+                    "run_database_tasks", failed_exit_code=5, stdout=StringIO()
+                )
+
+        assert exc_info.value.code == 5
+
+    def test_success_after_a_failure_still_reports_the_failure(self):
+        failing_task.enqueue()
+        simple_task.enqueue(1, 2)
+
+        with pytest.raises(SystemExit) as exc_info:
+            call_command("run_database_tasks", failed_exit_code=5, stdout=StringIO())
+
+        assert exc_info.value.code == 5
+
+    def test_failure_count_is_reported(self):
+        failing_task.enqueue()
+
+        out = StringIO()
+        call_command("run_database_tasks", stdout=out)
+
+        assert "Tasks failed: 1" in out.getvalue()
+
+    def test_exit_code_must_be_a_number(self):
+        with pytest.raises(CommandError, match="whole numbers"):
+            call_command("run_database_tasks", "--empty-exit-code=nope")
+
+    def test_exit_code_must_fit_in_a_wait_status(self):
+        with pytest.raises(CommandError, match="between 0 and 255"):
+            call_command("run_database_tasks", "--failed-exit-code=300")
+
+
+@pytest.mark.django_db
+class TestBrokerExitCodes:
+    """Exit codes for the tasks a broker hands the worker."""
+
+    def test_failed_broker_task_counts_as_failed(self):
+        result = failing_task.enqueue()
+        broker = FakePullBroker(batches=[[BrokerMessage(task_id=result.id)]])
+        backend = make_backend(broker)
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_worker(backend, source="broker", failed_exit_code=5, wait_time=0)
+
+        assert exc_info.value.code == 5
+
+    def test_receive_error_is_not_a_task_failure(self):
+        """
+        A broker that cannot be reached is an infrastructure problem, not a
+        task that failed, so it leaves the run looking idle instead.
+        """
+        broker = FakePullBroker()
+        broker.receive = lambda **kwargs: (_ for _ in ()).throw(RuntimeError("down"))
+        backend = make_backend(broker)
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_worker(
+                backend,
+                source="broker",
+                empty_exit_code=4,
+                failed_exit_code=5,
+                wait_time=0,
+            )
+
+        assert exc_info.value.code == 4
+
+    def test_failure_wins_over_an_empty_run(self):
+        """
+        A message the worker could not run leaves the processed count at
+        zero, so both conditions hold at once and the failure has to win.
+        """
+        result = simple_task.enqueue(1, 2)
+        broker = FakePullBroker(batches=[[BrokerMessage(task_id=result.id)]])
+        backend = make_backend(broker)
+
+        with patch.object(
+            DatabaseTaskBackend, "_resolve_task", side_effect=ImportError("gone")
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                run_worker(
+                    backend,
+                    source="broker",
+                    empty_exit_code=4,
+                    failed_exit_code=5,
+                    wait_time=0,
+                )
+
+        assert exc_info.value.code == 5
+
+    def test_missing_broker_task_is_not_a_failure(self):
+        """A message naming a task that is gone leaves nothing to fail."""
+        import uuid as uuid_module
+
+        broker = FakePullBroker(batches=[[BrokerMessage(task_id=uuid_module.uuid4())]])
+        backend = make_backend(broker)
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_worker(
+                backend,
+                source="broker",
+                empty_exit_code=4,
+                failed_exit_code=5,
+                wait_time=0,
+            )
+
+        assert exc_info.value.code == 4

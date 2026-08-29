@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 import traceback
 import warnings
 from functools import cached_property
@@ -16,6 +17,31 @@ from django.utils.json import normalize_json
 from django.utils.module_loading import import_string
 
 logger = logging.getLogger("django_database_task")
+
+
+def task_log_fields(db_task, worker_id=None, **extra):
+    """
+    Build the ``extra`` mapping attached to a task's log records.
+
+    These are the fields an operator filters on once the records go through
+    a structured (JSON) formatter, so they are kept flat and named apart
+    from LogRecord's own attributes.
+    """
+    fields = {
+        "task_id": str(db_task.id),
+        "task_path": db_task.task_path,
+        "queue_name": db_task.queue_name,
+        "priority": db_task.priority,
+        "backend_alias": db_task.backend_name,
+        "worker_id": worker_id,
+    }
+    fields.update(extra)
+    return fields
+
+
+def _elapsed_ms(started_monotonic):
+    """Milliseconds since a time.monotonic() reading, rounded to the ms."""
+    return round((time.monotonic() - started_monotonic) * 1000)
 
 
 class DatabaseTaskBackend(BaseTaskBackend):
@@ -334,7 +360,18 @@ class DatabaseTaskBackend(BaseTaskBackend):
 
         task = self._resolve_task(db_task.task_path)
         task_result = self._db_task_to_result(db_task, task)
+        log_fields = task_log_fields(db_task, worker_id)
+        logger.info(
+            "Task started: id=%s path=%s",
+            db_task.id,
+            db_task.task_path,
+            extra=log_fields,
+        )
         task_started.send(sender=self.__class__, task_result=task_result)
+
+        # Wall time of the run itself, kept apart from started_at/finished_at
+        # because those are database timestamps and can be rewritten.
+        started_monotonic = time.monotonic()
 
         try:
             # Get task function
@@ -390,6 +427,12 @@ class DatabaseTaskBackend(BaseTaskBackend):
                 "Task completed successfully: id=%s path=%s",
                 final_result.id,
                 db_task.task_path,
+                extra=task_log_fields(
+                    db_task,
+                    worker_id,
+                    status=str(TaskResultStatus.SUCCESSFUL),
+                    duration_ms=_elapsed_ms(started_monotonic),
+                ),
             )
             task_finished.send(sender=self.__class__, task_result=final_result)
             return final_result
@@ -423,6 +466,13 @@ class DatabaseTaskBackend(BaseTaskBackend):
                 final_result.id,
                 db_task.task_path,
                 error.exception_class_path,
+                extra=task_log_fields(
+                    db_task,
+                    worker_id,
+                    status=str(TaskResultStatus.FAILED),
+                    duration_ms=_elapsed_ms(started_monotonic),
+                    error_class=error.exception_class_path,
+                ),
             )
             task_finished.send(sender=self.__class__, task_result=final_result)
             return final_result
