@@ -4,6 +4,24 @@
 
 ### Added
 
+- **Recovery of tasks left in `RUNNING`**
+  (`manage.py requeue_stale_database_tasks --older-than 15m`). A worker killed
+  outright — SIGKILL, the OOM killer, a node failure — never writes a result,
+  so the task it held stays `RUNNING` and no other worker picks it up. The new
+  command finds those tasks and puts them back in `READY`. Previously the only
+  way out was a hand-written query.
+- `--older-than` is required and takes a unit (`90s`, `15m`, `2h`, `1d`). It
+  has to be longer than the longest task takes to run: nothing distinguishes a
+  dead worker from a slow task, so a threshold below that requeues tasks that
+  are still running.
+- `--max-attempts` (default 3) marks a task `FAILED` instead of requeueing it
+  once it has been handed to that many workers, so a task that kills its own
+  worker cannot be requeued forever.
+- `--mark-failed` records stale tasks as `FAILED` without requeueing them, for
+  tasks that are not safe to run twice, and `--notify-broker` re-notifies the
+  broker for workers that only receive from one. Also available as
+  `django_database_task.requeue_stale_tasks()` and as a "Requeue tasks stuck in
+  running" action in the Django admin.
 - **PostgreSQL LISTEN/NOTIFY broker**
   (`django_database_task.postgres.PostgresNotifyDatabaseBackend`). Notifies a
   channel of the database the tasks are already stored in, so a waiting worker

@@ -9,6 +9,7 @@ _EXECUTOR_EXPORTS = (
     "get_pending_task_count",
     "process_one_task",
     "process_tasks",
+    "requeue_stale_tasks",
     "run_task_by_id",
 )
 
@@ -40,5 +41,6 @@ __all__ = [
     "is_shutdown_requested",
     "process_one_task",
     "process_tasks",
+    "requeue_stale_tasks",
     "run_task_by_id",
 ]

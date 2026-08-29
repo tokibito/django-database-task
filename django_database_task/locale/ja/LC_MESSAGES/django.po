@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-database-task 0.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-12-27 07:13+0000\n"
+"POT-Creation-Date: 2026-08-29 23:15+0900\n"
 "PO-Revision-Date: 2025-12-27 00:00+0000\n"
 "Last-Translator: Shinya Okano <tokibito@gmail.com>\n"
 "Language-Team: Japanese\n"
@@ -17,13 +17,17 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: django_database_task/admin.py:116
+#: django_database_task/admin.py:117
 msgid "Run selected tasks"
 msgstr "選択したタスクを実行"
 
-#: django_database_task/admin.py:159
+#: django_database_task/admin.py:160
 msgid "Retry failed tasks"
 msgstr "失敗したタスクを再実行"
+
+#: django_database_task/admin.py:214
+msgid "Requeue tasks stuck in running"
+msgstr "実行中のまま残ったタスクをキューに戻す"
 
 #: django_database_task/models.py:14
 msgid "task path"

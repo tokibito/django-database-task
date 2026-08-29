@@ -5,6 +5,7 @@ from django.tasks.base import TaskResultStatus
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 
+from .executor import _requeue_task
 from .models import DatabaseTask
 
 
@@ -107,7 +108,7 @@ class DatabaseTaskAdmin(admin.ModelAdmin):
 
     status_badge.short_description = "Status"
 
-    actions = ["run_selected_tasks", "retry_failed_tasks"]
+    actions = ["run_selected_tasks", "retry_failed_tasks", "requeue_stale_tasks"]
 
     def has_add_permission(self, request):
         """Disable adding tasks from admin."""
@@ -208,4 +209,42 @@ class DatabaseTaskAdmin(admin.ModelAdmin):
             request,
             f"Retry completed: {', '.join(msg_parts)}.",
             messages.SUCCESS if fail_count == 0 else messages.WARNING,
+        )
+
+    @admin.action(description=_("Requeue tasks stuck in running"))
+    def requeue_stale_tasks(self, request, queryset):
+        """
+        Reset selected RUNNING tasks to READY, leaving them for a worker.
+
+        For tasks whose worker was killed before it could write a result.
+        Unlike the other actions this one does not run anything: a worker
+        picks the task up on its next poll, on a machine meant for it.
+
+        Nothing here checks how long the task has been RUNNING - that is
+        what the operator selecting it is doing. Only requeue a task you
+        know is not still running somewhere, and that is safe to run twice.
+        """
+        running_tasks = queryset.filter(status=TaskResultStatus.RUNNING)
+        running_count = running_tasks.count()
+
+        if running_count == 0:
+            self.message_user(
+                request,
+                "No tasks in RUNNING status were selected.",
+                messages.WARNING,
+            )
+            return
+
+        requeued_count = sum(1 for db_task in running_tasks if _requeue_task(db_task))
+
+        skipped_count = queryset.count() - requeued_count
+        msg_parts = [f"{requeued_count} requeued"]
+        if skipped_count:
+            msg_parts.append(f"{skipped_count} skipped (not RUNNING)")
+
+        self.message_user(
+            request,
+            f"Requeue completed: {', '.join(msg_parts)}. "
+            f"They run on the next worker poll.",
+            messages.SUCCESS if requeued_count else messages.WARNING,
         )

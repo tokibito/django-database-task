@@ -16,6 +16,7 @@ A database-backed task queue backend for Django's built-in task framework.
 - **Django Admin integration** - View and manage tasks from the admin interface
 - **Async support** - Supports async task functions
 - **Graceful shutdown** - Workers finish the running task before exiting on `SIGTERM`
+- **Crash recovery** - Tasks stranded in `RUNNING` by a killed worker are found and requeued
 - **Instant pickup on PostgreSQL** - Optional `LISTEN`/`NOTIFY` broker that wakes the worker the moment a task is saved, with no extra service to run
 - **Google Cloud Tasks integration** - Optional backend for GAE/Cloud Run with auto-detection
 
@@ -323,6 +324,28 @@ python manage.py purge_completed_database_tasks [options]
 | `--batch-size` | Number of tasks to delete at once (default: 1000) |
 | `--dry-run` | Show count only without deleting |
 
+### requeue_stale_database_tasks
+
+Recover tasks left in `RUNNING` status by a worker that was killed before it
+could write a result. See
+[Recovering tasks left in RUNNING status](#recovering-tasks-left-in-running-status)
+for what this does to a task and when it is safe.
+
+```bash
+python manage.py requeue_stale_database_tasks --older-than 1h [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--older-than` | **Required.** Only touch tasks that have been `RUNNING` for longer than this: `90s`, `15m`, `2h`, `1d`. The unit is required |
+| `--queue` | Queue name to recover (all queues if not specified) |
+| `--backend` | Backend name to recover (all backends if not specified) |
+| `--max-attempts` | Mark a task `FAILED` instead of requeueing it once it has been handed to this many workers (0=no limit, default: 3) |
+| `--mark-failed` | Mark every stale task `FAILED` instead of requeueing it |
+| `--notify-broker` | Tell the backend's broker about each requeued task |
+| `--batch-size` | Number of tasks to process at once (default: 1000) |
+| `--dry-run` | Show what would happen without changing anything |
+
 ## Graceful Shutdown
 
 When a worker is redeployed, the orchestrator (Kubernetes, Cloud Run, systemd,
@@ -446,30 +469,118 @@ Make sure the worker is PID 1 or that the signal reaches it (use the exec form
 of `CMD`, or an init such as `tini`, rather than wrapping the command in a
 shell script that swallows signals).
 
-### Tasks left in RUNNING status
+### Recovering tasks left in RUNNING status
 
-If a worker is killed with `SIGKILL` (grace period exceeded, node failure,
-`--no-graceful-shutdown`), the task it was running stays in `RUNNING` status
-because no process is left to update it. Such tasks are not picked up again by
-other workers. They can be found and requeued from the Django admin, or with a
-query like:
+If a worker is killed with `SIGKILL` (grace period exceeded, OOM killer, node
+failure, `--no-graceful-shutdown`), the task it was running stays in `RUNNING`
+status because no process is left to update it. Such tasks are not picked up
+again by other workers, so without recovery they sit there forever.
 
-```python
-from datetime import timedelta
+`requeue_stale_database_tasks` finds them and puts them back in `READY`:
 
-from django.tasks.base import TaskResultStatus
-from django.utils import timezone
-
-from django_database_task.models import DatabaseTask
-
-stale = DatabaseTask.objects.filter(
-    status=TaskResultStatus.RUNNING,
-    last_attempted_at__lt=timezone.now() - timedelta(hours=1),
-)
-stale.update(status=TaskResultStatus.READY)
+```bash
+python manage.py requeue_stale_database_tasks --older-than 1h
 ```
 
-Only requeue tasks that are safe to run twice (idempotent).
+```console
+Stale after: 1h
+Mode: requeue (max attempts: 3)
+Found 2 stale tasks
+Requeued 2 tasks, marked 0 as failed
+```
+
+Run it from cron or a systemd timer, next to your purge job. It is a separate
+command on purpose: recovering on worker startup would let a machine with a
+skewed clock take a task another worker is still running.
+
+```cron
+*/5 * * * * cd /srv/app && python manage.py requeue_stale_database_tasks --older-than 1h
+0 4 * * *   cd /srv/app && python manage.py purge_completed_database_tasks --days 7
+```
+
+#### Choosing --older-than
+
+**Keep the threshold comfortably above your longest running task.** Nothing
+distinguishes "the worker died" from "the task is slow" - both look like a row
+that has been `RUNNING` for a while. A task still running when its threshold
+passes is requeued and ends up running twice, on two workers at once.
+
+The option is required and has no default for that reason. If your longest task
+takes 20 minutes, `--older-than 1h` is a reasonable choice; `--older-than 15m`
+is not.
+
+#### What recovery does to a task
+
+| | Requeued (`READY`) | Given up on (`FAILED`) |
+|---|---|---|
+| `status` | `READY` | `FAILED` |
+| `started_at` | cleared | kept |
+| `finished_at` | cleared | set to now, so `purge --days` can see it |
+| `return_value_json` | cleared | kept |
+| `errors_json` | kept | a `WorkerLost` entry is added |
+| `worker_ids_json` | kept - this is the attempt count | kept |
+
+A task is given up on rather than requeued when it has already been handed to
+`--max-attempts` workers (default 3), or when `--mark-failed` is used.
+
+`--max-attempts` is there for tasks that kill the worker themselves - one that
+exhausts the machine's memory would otherwise be requeued forever, killing one
+worker after another. Once it trips, the task stops moving and a person can
+look at it. Note that a `FAILED` task is in the default target of
+`purge_completed_database_tasks`, so it disappears on the next purge; narrow
+`--status` or widen `--days` if you need time to investigate.
+
+#### Non-idempotent tasks
+
+Requeueing runs the task **again from the beginning**. Whatever the killed
+attempt already did is not undone: mail that was sent stays sent, an external
+API call stays made, a charge stays charged. Recovery is only safe for tasks
+that can run twice.
+
+A task is safe if its writes are idempotent - `get_or_create` or an upsert
+rather than a blind `create`, an idempotency key on outbound API calls, a
+"done" marker checked at the top. If a half-finished run leaves something
+inconsistent, it is not safe.
+
+If some of your tasks are not idempotent, pick one of these:
+
+**Make the task idempotent** (best, when you can). Pass an idempotency key to
+external services, record what has already been done, and check it on entry.
+
+**Split the queues** and treat them differently. Send tasks that cannot be
+repeated to their own queue, and run recovery twice with different options:
+
+```cron
+# Safe to run twice: put them back in the queue, one job per queue.
+*/5 * * * * cd /srv/app && python manage.py requeue_stale_database_tasks --older-than 1h --queue default
+*/5 * * * * cd /srv/app && python manage.py requeue_stale_database_tasks --older-than 1h --queue emails
+# Not safe: record them as failed and leave them to a person.
+*/5 * * * * cd /srv/app && python manage.py requeue_stale_database_tasks --older-than 1h --queue payments --mark-failed
+```
+
+Name every safe queue explicitly rather than running one job without `--queue`:
+without it the command covers *every* queue, the unsafe one included, and it
+would requeue the tasks you meant to hold back.
+
+**Mark everything failed** and requeue by hand. Run recovery with
+`--mark-failed` everywhere, then use the "Requeue tasks stuck in running"
+action in the Django admin (or "Retry failed tasks") on the ones you decide are
+safe. The admin action does not run the task itself - it puts it back in
+`READY` for a worker to pick up.
+
+#### Workers that only receive from a broker
+
+Requeueing a task puts it back in the database, but the broker message for the
+killed attempt is already gone. A worker running with `--source broker` never
+sees the task again. Add `--notify-broker` so the broker is told about each
+requeued task:
+
+```bash
+python manage.py requeue_stale_database_tasks --older-than 1h --notify-broker
+```
+
+This is off by default; with `--source db` or `--source both` the worker finds
+the task by polling and no message is needed.
 
 ### Using it in your own worker loop
 
@@ -503,6 +614,7 @@ from django_database_task import (
     process_one_task,
     process_tasks,
     get_pending_task_count,
+    requeue_stale_tasks,
     run_task_by_id,
 )
 
@@ -529,6 +641,13 @@ if result:
 
 # Retry a failed task
 result = run_task_by_id("...", allow_retry=True)
+
+# Recover tasks left in RUNNING status by a worker that was killed
+from datetime import timedelta
+from django_database_task import requeue_stale_tasks
+
+summary = requeue_stale_tasks(timedelta(hours=1))
+print(summary)  # {'found': 2, 'requeued': 2, 'failed': 0}
 
 # Stop starting new tasks when the process receives SIGTERM/SIGINT
 from django_database_task import GracefulShutdown
@@ -1106,7 +1225,7 @@ the other brokers. What that buys here:
 - **There is nothing to acknowledge.** A notification is never redelivered, so
   `ack()` and `nack()` do nothing. A worker that dies mid-task leaves the task
   behind in `RUNNING` — see
-  [Tasks left in RUNNING status](#tasks-left-in-running-status)
+  [Recovering tasks left in RUNNING status](#recovering-tasks-left-in-running-status)
 
 ### Options
 
