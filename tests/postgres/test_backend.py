@@ -78,7 +78,7 @@ class TestPostgresNotifyDatabaseBackendEnqueue:
         result = backend.enqueue(simple_task, (2, 3), {})
 
         assert DatabaseTask.objects.get(id=result.id).status == TaskResultStatus.READY
-        assert "PostgresNotifyBroker failed to enqueue task" in caplog.text
+        assert "PostgresNotifyBroker failed to notify about task" in caplog.text
 
 
 @pytest.mark.django_db

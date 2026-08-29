@@ -131,7 +131,7 @@ class CloudTasksBroker(HTTPPushBroker):
 
         return [create_oidc_auth_handler(audience)]
 
-    def enqueue(self, task_result):
+    def notify(self, task_result):
         """
         Create a Cloud Task that triggers execution of a saved task.
 

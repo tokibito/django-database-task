@@ -108,7 +108,7 @@ class TestSQSBrokerEnqueue:
     def test_sends_the_task_id(self, monkeypatch):
         broker = make_broker(monkeypatch)
 
-        broker.enqueue(make_task_result(task_id="abc-123"))
+        broker.notify(make_task_result(task_id="abc-123"))
 
         request = broker.client.send_message.call_args.kwargs
         assert json.loads(request["MessageBody"]) == {"task_id": "abc-123"}
@@ -120,7 +120,7 @@ class TestSQSBrokerEnqueue:
             SQS_QUEUE_URL_TEMPLATE="https://sqs.example.com/1/{queue_name}",
         )
 
-        broker.enqueue(make_task_result(queue_name="ranking"))
+        broker.notify(make_task_result(queue_name="ranking"))
 
         request = broker.client.send_message.call_args.kwargs
         assert request["QueueUrl"] == "https://sqs.example.com/1/ranking"
@@ -129,7 +129,7 @@ class TestSQSBrokerEnqueue:
         broker = make_broker(monkeypatch)
         run_after = timezone.now() + timedelta(minutes=10)
 
-        broker.enqueue(make_task_result(run_after=run_after))
+        broker.notify(make_task_result(run_after=run_after))
 
         delay = broker.client.send_message.call_args.kwargs["DelaySeconds"]
         assert 590 <= delay <= 600
@@ -138,7 +138,7 @@ class TestSQSBrokerEnqueue:
         broker = make_broker(monkeypatch)
         run_after = timezone.now() - timedelta(minutes=10)
 
-        broker.enqueue(make_task_result(run_after=run_after))
+        broker.notify(make_task_result(run_after=run_after))
 
         assert broker.client.send_message.call_args.kwargs["DelaySeconds"] == 0
 
@@ -148,7 +148,7 @@ class TestSQSBrokerEnqueue:
         # A second of headroom, so the clock cannot cross the boundary.
         run_after = timezone.now() + timedelta(seconds=seconds + 1)
 
-        broker.enqueue(make_task_result(run_after=run_after))
+        broker.notify(make_task_result(run_after=run_after))
 
         assert broker.client.send_message.called is sent
 
@@ -157,7 +157,7 @@ class TestSQSBrokerEnqueue:
         broker = make_broker(monkeypatch)
         run_after = timezone.now() + timedelta(days=1)
 
-        result = broker.enqueue(make_task_result(run_after=run_after))
+        result = broker.notify(make_task_result(run_after=run_after))
 
         assert result is None
         broker.client.send_message.assert_not_called()
@@ -166,7 +166,7 @@ class TestSQSBrokerEnqueue:
         broker = make_broker(monkeypatch, MAX_DELAY_SECONDS=60)
         run_after = timezone.now() + timedelta(minutes=5)
 
-        broker.enqueue(make_task_result(run_after=run_after))
+        broker.notify(make_task_result(run_after=run_after))
 
         broker.client.send_message.assert_not_called()
 

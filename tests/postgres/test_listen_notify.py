@@ -82,19 +82,19 @@ class TestDelivery:
     """Tests for a notification travelling from enqueue() to receive()."""
 
     def test_a_listener_receives_the_task_id(self, broker):
-        broker.enqueue(make_task_result(task_id="abc-123"))
+        broker.notify(make_task_result(task_id="abc-123"))
 
         assert task_ids(broker.receive(wait_seconds=WAIT)) == ["abc-123"]
 
     def test_the_queue_name_travels_with_it(self, broker):
-        broker.enqueue(make_task_result(queue_name="reports"))
+        broker.notify(make_task_result(queue_name="reports"))
 
         messages = broker.receive(queue_name="reports", wait_seconds=WAIT)
 
         assert len(messages) == 1
 
     def test_a_worker_on_another_queue_ignores_it(self, broker):
-        broker.enqueue(make_task_result(queue_name="reports"))
+        broker.notify(make_task_result(queue_name="reports"))
 
         assert broker.receive(queue_name="default", wait_seconds=QUIET_WAIT) == []
 
@@ -104,7 +104,7 @@ class TestDelivery:
     def test_a_deferred_task_is_not_announced(self, broker):
         run_after = timezone.now() + timedelta(hours=1)
 
-        assert broker.enqueue(make_task_result(run_after=run_after)) is None
+        assert broker.notify(make_task_result(run_after=run_after)) is None
         assert broker.receive(wait_seconds=QUIET_WAIT) == []
 
     def test_a_channel_name_that_needs_quoting_works(self):
@@ -114,7 +114,7 @@ class TestDelivery:
         )
         broker.get_connection()
         try:
-            broker.enqueue(make_task_result(task_id="quoted-1"))
+            broker.notify(make_task_result(task_id="quoted-1"))
 
             assert task_ids(broker.receive(wait_seconds=WAIT)) == ["quoted-1"]
         finally:
@@ -126,7 +126,7 @@ class TestTransactions:
 
     def test_it_arrives_only_once_the_transaction_commits(self, broker):
         with transaction.atomic():
-            broker.enqueue(make_task_result(task_id="committed-1"))
+            broker.notify(make_task_result(task_id="committed-1"))
 
             assert broker.receive(wait_seconds=QUIET_WAIT) == []
 
@@ -135,7 +135,7 @@ class TestTransactions:
     def test_a_rolled_back_task_is_never_announced(self, broker):
         with pytest.raises(Rollback):
             with transaction.atomic():
-                broker.enqueue(make_task_result(task_id="rolled-back-1"))
+                broker.notify(make_task_result(task_id="rolled-back-1"))
                 raise Rollback
 
         assert broker.receive(wait_seconds=QUIET_WAIT) == []
@@ -145,8 +145,8 @@ class TestListening:
     """Tests for the connection the broker waits on."""
 
     def test_notifications_sent_while_the_worker_was_busy_come_back(self, broker):
-        broker.enqueue(make_task_result(task_id="first"))
-        broker.enqueue(make_task_result(task_id="second"))
+        broker.notify(make_task_result(task_id="first"))
+        broker.notify(make_task_result(task_id="second"))
 
         first = broker.receive(max_messages=1, wait_seconds=WAIT)
         second = broker.receive(max_messages=1, wait_seconds=WAIT)
@@ -164,7 +164,7 @@ class TestListening:
         broker.close()
 
         second = broker.get_connection()
-        broker.enqueue(make_task_result(task_id="after-reconnect"))
+        broker.notify(make_task_result(task_id="after-reconnect"))
 
         assert second is not first
         assert task_ids(broker.receive(wait_seconds=WAIT)) == ["after-reconnect"]

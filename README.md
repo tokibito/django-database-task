@@ -286,7 +286,7 @@ indefinitely. A broker with a delivery delay limit — SQS caps it at 15 minutes
 — cannot carry a task deferred further out than that, so those stay in the
 database until they are due, and the database sweep is what picks them up. It
 is also what recovers tasks the broker never accepted, since a broker failure
-during `enqueue()` is logged and swallowed.
+during `notify()` is logged and swallowed.
 
 While receiving from a broker, `--wait-time` replaces `--interval` as the idle
 wait: the broker's own wait for a message is the pause, so a message wakes the
@@ -1408,7 +1408,7 @@ from django_database_task.brokers import HTTPPushBroker
 
 
 class MyBroker(HTTPPushBroker):
-    def enqueue(self, task_result):
+    def notify(self, task_result):
         url = self.get_handler_url(task_result.id)
         queue = self.resolve_queue(task_result.task.queue_name)
         my_service.publish(queue, url)
@@ -1420,7 +1420,7 @@ class MyBroker(HTTPPushBroker):
 
 | Base class | Use for |
 |------------|---------|
-| `TaskBroker` | Anything else |
+| `TaskBroker` | Anything else. Defines `notify()`, which every broker implements |
 | `HTTPPushBroker` | Services that call an HTTP endpoint of your app (Cloud Tasks). Provides `get_handler_url()`, `TASK_HANDLER_URL` and `TASK_HANDLER_PATH` |
 | `PullBroker` | Services a worker waits on (SQS, PostgreSQL LISTEN/NOTIFY). Defines `receive()`, `ack()` and `nack()` |
 
@@ -1553,7 +1553,7 @@ all.
 Both are covered by the database sweep the worker already performs, which is
 why `--source` resolves to `both` rather than `broker`, and why the worker
 should be left running with `--continuous`. The same sweep recovers tasks the
-`pg_notify()` call never reached, since a broker failure during `enqueue()` is
+`pg_notify()` call never reached, since a broker failure during `notify()` is
 logged and swallowed.
 
 The sweep runs when the wait on the channel times out, so `--wait-time`
@@ -1973,7 +1973,7 @@ It stays `READY` in the database, and the database sweep the worker already
 performs runs it once it is due. This is why `--source` resolves to `both`
 rather than `broker`, and why the worker should be left running with
 `--continuous`. The same sweep recovers tasks SQS never accepted, since a
-broker failure during `enqueue()` is logged and swallowed.
+broker failure during `notify()` is logged and swallowed.
 
 ### Serverless
 

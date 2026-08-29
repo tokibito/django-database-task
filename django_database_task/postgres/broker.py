@@ -119,9 +119,9 @@ class PostgresNotifyBroker(PullBroker):
 
         return is_psycopg3
 
-    # -- enqueue ---------------------------------------------------------
+    # -- notify ----------------------------------------------------------
 
-    def enqueue(self, task_result):
+    def notify(self, task_result):
         """
         Notify the channel about a task that was just saved.
 

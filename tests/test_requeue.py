@@ -255,14 +255,14 @@ class TestDryRun:
 
 
 class RecordingBroker:
-    """A broker that records what it was asked to enqueue."""
+    """A broker that records what it was asked to notify about."""
 
     def __init__(self, backend, options=None):
         self.backend = backend
-        self.enqueued = []
+        self.notified = []
 
-    def enqueue(self, task_result):
-        self.enqueued.append(task_result)
+    def notify(self, task_result):
+        self.notified.append(task_result)
 
     def get_auth_handlers(self, endpoint=None):
         return []
@@ -271,7 +271,7 @@ class RecordingBroker:
 class BrokenBroker(RecordingBroker):
     """A broker that is down."""
 
-    def enqueue(self, task_result):
+    def notify(self, task_result):
         raise RuntimeError("broker is down")
 
 
@@ -294,18 +294,18 @@ class TestBrokerNotification:
 
         with override_settings(TASKS=tasks_setting(RecordingBroker)):
             requeue_stale_tasks(timedelta(minutes=15), notify_broker=True)
-            enqueued = task_backends["default"].broker.enqueued
+            notified = task_backends["default"].broker.notified
 
-        assert [result.id for result in enqueued] == [str(db_task.id)]
+        assert [result.id for result in notified] == [str(db_task.id)]
 
     def test_the_broker_is_not_told_by_default(self):
         make_running_task(minutes_ago=60)
 
         with override_settings(TASKS=tasks_setting(RecordingBroker)):
             requeue_stale_tasks(timedelta(minutes=15))
-            enqueued = task_backends["default"].broker.enqueued
+            notified = task_backends["default"].broker.notified
 
-        assert enqueued == []
+        assert notified == []
 
     def test_a_task_marked_failed_is_not_sent_to_the_broker(self):
         make_running_task(minutes_ago=60)
@@ -314,9 +314,9 @@ class TestBrokerNotification:
             requeue_stale_tasks(
                 timedelta(minutes=15), mark_failed=True, notify_broker=True
             )
-            enqueued = task_backends["default"].broker.enqueued
+            notified = task_backends["default"].broker.notified
 
-        assert enqueued == []
+        assert notified == []
 
     def test_a_broker_that_is_down_does_not_undo_the_requeue(self):
         db_task = make_running_task(minutes_ago=60)

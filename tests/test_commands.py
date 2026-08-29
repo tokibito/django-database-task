@@ -431,7 +431,7 @@ class FakePullBroker(PullBroker):
         self.acked = []
         self.nacked = []
 
-    def enqueue(self, task_result):
+    def notify(self, task_result):
         pass
 
     def receive(self, queue_name=None, max_messages=1, wait_seconds=20):

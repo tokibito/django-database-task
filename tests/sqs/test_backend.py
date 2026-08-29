@@ -66,7 +66,7 @@ class TestSQSDatabaseBackendEnqueue:
         result = backend.enqueue(simple_task, (2, 3), {})
 
         assert DatabaseTask.objects.get(id=result.id).status == TaskResultStatus.READY
-        assert "SQSBroker failed to enqueue task" in caplog.text
+        assert "SQSBroker failed to notify about task" in caplog.text
 
 
 @pytest.mark.django_db
