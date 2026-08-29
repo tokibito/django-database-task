@@ -8,6 +8,8 @@ import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.utils import timezone
 
+from .conftest import make_task_result
+
 # Skip all tests if boto3 is not installed
 pytest.importorskip("boto3")
 
@@ -24,17 +26,6 @@ def make_broker(monkeypatch, client=None, **options):
         "QueueUrl": "https://sqs.ap-northeast-1.amazonaws.com/1/default"
     }
     return broker
-
-
-def make_task_result(
-    task_id="3f2a9c11-0000-4000-8000-000000000000", queue_name="default", run_after=None
-):
-    """A stand-in for the TaskResult the backend hands to the broker."""
-    result = MagicMock()
-    result.id = task_id
-    result.task.queue_name = queue_name
-    result.task.run_after = run_after
-    return result
 
 
 class TestSQSBrokerInit:

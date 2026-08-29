@@ -60,6 +60,10 @@ dev = [
     "pytest>=7.0",
     "pytest-django>=4.5",
     "ruff>=0.16,<0.17",
+    # Stands in for SQS in tests/sqs/test_integration.py, in-process and
+    # without an AWS account. A test dependency rather than an integration
+    # extra: nothing a project installs needs it.
+    "moto[server]>=5.0",
 ]
 
 [project.urls]

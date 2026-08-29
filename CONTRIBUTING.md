@@ -34,8 +34,12 @@ A full run reports **no skipped tests**. If you see any, an extra is missing
 from your environment — see above.
 
 Tests use pytest-django with the settings in `tests/settings.py`, on an
-in-memory SQLite database. Neither the Cloud Tasks nor the SQS tests reach the
-network: both stub their client.
+in-memory SQLite database. Nothing reaches the network: the Cloud Tasks tests
+stub their client, and the SQS tests run against [moto], which stands in for
+the queue in-process. moto comes with the `dev` extra, so a normal install
+runs them.
+
+[moto]: https://github.com/getmoto/moto
 
 To run part of the suite:
 
