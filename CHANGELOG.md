@@ -70,6 +70,16 @@
   Bundled brokers and the `BROKER` option are unaffected; only a broker written
   by hand against 0.4 needs the change.
 
+### Removed
+
+- `get_auth_handler()` (singular), deprecated in 0.4 and removed here as
+  announced. A backend that overrides it is no longer called and its endpoints
+  fall back to whatever `get_auth_handlers()` returns — which, unless the
+  backend also overrides that or sets `AUTH_HANDLERS`, is nothing, leaving the
+  endpoints unauthenticated. Override `get_auth_handlers()` instead. The
+  `CLOUD_TASKS_*` options, `AUTH_HANDLERS` and the bundled backends are
+  unaffected.
+
 ## 0.4.0
 
 Brokers — the services that trigger execution of a saved task — are now

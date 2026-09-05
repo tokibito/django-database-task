@@ -177,64 +177,6 @@ class TestCloudTasksDatabaseBackendEnqueue:
         assert "API Error" in caplog.text
 
 
-class TestCloudTasksDatabaseBackendGetAuthHandler:
-    """Tests for get_auth_handler method."""
-
-    def test_returns_none_without_oidc_config(self, monkeypatch):
-        """Should return None when OIDC is not configured."""
-        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-project")
-        monkeypatch.setenv("CLOUD_RUN_REGION", "asia-northeast1")
-        monkeypatch.setenv("K_SERVICE", "my-service")
-
-        from django_database_task.cloudtasks import CloudTasksDatabaseBackend
-
-        backend = CloudTasksDatabaseBackend("default", {"OPTIONS": {}})
-
-        assert backend.get_auth_handler() is None
-
-    def test_returns_handler_with_oidc_config(self, monkeypatch):
-        """Should return auth handler when OIDC is configured."""
-        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-project")
-        monkeypatch.setenv("CLOUD_RUN_REGION", "asia-northeast1")
-        monkeypatch.setenv("K_SERVICE", "my-service")
-
-        from django_database_task.cloudtasks import CloudTasksDatabaseBackend
-
-        backend = CloudTasksDatabaseBackend(
-            "default",
-            {
-                "OPTIONS": {
-                    "OIDC_SERVICE_ACCOUNT_EMAIL": "sa@project.iam.gserviceaccount.com",
-                }
-            },
-        )
-
-        handler = backend.get_auth_handler()
-        assert handler is not None
-        assert callable(handler)
-
-    def test_uses_explicit_audience(self, monkeypatch):
-        """Should use explicit OIDC_AUDIENCE when set."""
-        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-project")
-        monkeypatch.setenv("CLOUD_RUN_REGION", "asia-northeast1")
-        monkeypatch.setenv("K_SERVICE", "my-service")
-
-        from django_database_task.cloudtasks import CloudTasksDatabaseBackend
-
-        backend = CloudTasksDatabaseBackend(
-            "default",
-            {
-                "OPTIONS": {
-                    "OIDC_SERVICE_ACCOUNT_EMAIL": "sa@project.iam.gserviceaccount.com",
-                    "OIDC_AUDIENCE": "https://custom-audience.com",
-                }
-            },
-        )
-
-        handler = backend.get_auth_handler()
-        assert handler is not None
-
-
 class TestCloudTasksDatabaseBackendGetAuthHandlers:
     """Tests for combining the OIDC handler with configured handlers."""
 
@@ -280,18 +222,6 @@ class TestCloudTasksDatabaseBackendGetAuthHandlers:
         handlers = backend.get_auth_handlers()
 
         assert len(handlers) == 2
-
-    def test_does_not_warn_about_the_deprecated_api(self, monkeypatch, recwarn):
-        """The bundled backend keeps get_auth_handler() without deprecation noise."""
-        backend = self._backend(
-            monkeypatch,
-            OIDC_SERVICE_ACCOUNT_EMAIL="sa@project.iam.gserviceaccount.com",
-        )
-        backend.get_auth_handlers()
-
-        assert [
-            w for w in recwarn.list if issubclass(w.category, DeprecationWarning)
-        ] == []
 
     def test_configured_handlers_can_be_scoped_to_an_endpoint(self, monkeypatch):
         """A cron-only credential need not apply to the execute endpoint."""

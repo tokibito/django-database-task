@@ -885,7 +885,9 @@ class AuthHandlerRecorder:
 def rejecting_handler(monkeypatch):
     """Make the default backend reject every request with a 401."""
     recorder = AuthHandlerRecorder(JsonResponse({"error": "Unauthorized"}, status=401))
-    monkeypatch.setattr(DatabaseTaskBackend, "get_auth_handler", lambda self: recorder)
+    monkeypatch.setattr(
+        DatabaseTaskBackend, "get_auth_handlers", lambda self, endpoint=None: [recorder]
+    )
     return recorder
 
 
@@ -893,7 +895,9 @@ def rejecting_handler(monkeypatch):
 def accepting_handler(monkeypatch):
     """Make the default backend accept every request."""
     recorder = AuthHandlerRecorder(None)
-    monkeypatch.setattr(DatabaseTaskBackend, "get_auth_handler", lambda self: recorder)
+    monkeypatch.setattr(
+        DatabaseTaskBackend, "get_auth_handlers", lambda self, endpoint=None: [recorder]
+    )
     return recorder
 
 
@@ -908,9 +912,7 @@ class TestBackendAuthentication:
 
     def test_base_backend_provides_no_handler(self):
         """The base backend opts out of authentication."""
-        assert (
-            DatabaseTaskBackend(alias="default", params={}).get_auth_handler() is None
-        )
+        assert DatabaseTaskBackend(alias="default", params={}).get_auth_handlers() == []
 
     @pytest.mark.parametrize("url_name,method,args", AUTHENTICATED_ENDPOINTS)
     def test_rejected_request_is_blocked(
@@ -996,8 +998,8 @@ class TestBackendAuthentication:
         seen = []
         monkeypatch.setattr(
             DatabaseTaskBackend,
-            "get_auth_handler",
-            lambda self: lambda request: seen.append(request) or None,
+            "get_auth_handlers",
+            lambda self, endpoint=None: [lambda request: seen.append(request) or None],
         )
 
         response = client.post(
@@ -1145,66 +1147,16 @@ class TestAuthHandlerComposition:
         assert client.get(url).status_code == 401
         assert client.get(url, HTTP_AUTHORIZATION="Bearer s3cret").status_code == 200
 
-    def test_a_backend_with_only_the_deprecated_api_is_supported(
+    def test_a_backend_without_auth_handlers_is_unauthenticated(
         self, client, use_backend
     ):
-        """A third party backend that predates get_auth_handlers() still works."""
+        """A third party backend that provides no handlers lets requests in."""
 
-        class LegacyBackend:
-            def __init__(self):
-                self.recorder = AuthHandlerRecorder(
-                    JsonResponse({"error": "legacy"}, status=401)
-                )
+        class HandlerlessBackend:
+            pass
 
-            def get_auth_handler(self):
-                return self.recorder
-
-        backend = use_backend(LegacyBackend())
+        use_backend(HandlerlessBackend())
 
         response = client.get(reverse("django_database_task:task_status"))
 
-        assert response.status_code == 401
-        assert len(backend.recorder.requests) == 1
-
-
-class TestDeprecatedAuthHandler:
-    """Tests for the deprecated single-handler API."""
-
-    def test_an_override_is_still_used_and_warns(self):
-        """A subclass overriding get_auth_handler() keeps working."""
-        recorder = AuthHandlerRecorder(None)
-
-        class CustomBackend(DatabaseTaskBackend):
-            def get_auth_handler(self):
-                return recorder
-
-        backend = CustomBackend(alias="default", params={})
-
-        with pytest.warns(DeprecationWarning, match="get_auth_handler"):
-            handlers = backend.get_auth_handlers()
-
-        assert handlers == [recorder]
-
-    def test_the_warning_is_emitted_once_per_backend(self, recwarn):
-        """The deprecation notice does not repeat on every request."""
-
-        class CustomBackend(DatabaseTaskBackend):
-            def get_auth_handler(self):
-                return None
-
-        backend = CustomBackend(alias="default", params={})
-        backend.get_auth_handlers()
-        backend.get_auth_handlers()
-
-        assert (
-            len([w for w in recwarn.list if issubclass(w.category, DeprecationWarning)])
-            == 1
-        )
-
-    def test_the_default_implementation_does_not_warn(self, recwarn):
-        """Backends that never touched the old API stay quiet."""
-        DatabaseTaskBackend(alias="default", params={}).get_auth_handlers()
-
-        assert [
-            w for w in recwarn.list if issubclass(w.category, DeprecationWarning)
-        ] == []
+        assert response.status_code == 200

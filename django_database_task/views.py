@@ -77,19 +77,17 @@ class BackendAuthMixin:
         return request.GET.get("backend_name", "default")
 
     def get_auth_handlers(self, backend):
-        """Return the handlers that may authenticate this request."""
-        get_auth_handlers = getattr(backend, "get_auth_handlers", None)
-        if get_auth_handlers is not None:
-            return list(get_auth_handlers(self.auth_endpoint) or [])
+        """
+        Return the handlers that may authenticate this request.
 
-        # A third party backend that only implements the API deprecated
-        # in 0.4.
-        get_auth_handler = getattr(backend, "get_auth_handler", None)
-        if get_auth_handler is None:
+        A backend that provides no get_auth_handlers() leaves the endpoints
+        unauthenticated.
+        """
+        get_auth_handlers = getattr(backend, "get_auth_handlers", None)
+        if get_auth_handlers is None:
             return []
 
-        auth_handler = get_auth_handler()
-        return [auth_handler] if auth_handler is not None else []
+        return list(get_auth_handlers(self.auth_endpoint) or [])
 
     def get_auth_error_response(self, request, *args, **kwargs):
         """Return a response if authentication fails, None if it passes."""
