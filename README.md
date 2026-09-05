@@ -1346,8 +1346,8 @@ class MyBackend(DatabaseTaskBackend):
         return [allow_internal_network, *super().get_auth_handlers(endpoint)]
 ```
 
-> **Deprecated:** the single-handler `get_auth_handler()` still works in 0.4
-> but is removed in 0.5. Override `get_auth_handlers()` instead.
+> **Removed in 0.5:** the single-handler `get_auth_handler()`. Override
+> `get_auth_handlers()` instead; it is no longer called.
 
 ## Task Brokers
 

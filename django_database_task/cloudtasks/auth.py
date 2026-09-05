@@ -20,8 +20,8 @@ def create_oidc_auth_handler(audience):
     """
     Create an OIDC authentication handler for Cloud Tasks.
 
-    This function returns a handler that can be used with the backend's
-    get_auth_handler() method to verify OIDC tokens from Cloud Tasks.
+    This function returns a handler that can be used with the broker's
+    get_auth_handlers() method to verify OIDC tokens from Cloud Tasks.
 
     Args:
         audience: The expected audience claim in the token.
@@ -32,11 +32,11 @@ def create_oidc_auth_handler(audience):
         - A JsonResponse with error details if authentication fails
 
     Usage:
-        # In CloudTasksDatabaseBackend
-        def get_auth_handler(self):
+        # In CloudTasksBroker
+        def get_auth_handlers(self, endpoint=None):
             if self.oidc_audience:
-                return create_oidc_auth_handler(self.oidc_audience)
-            return None
+                return [create_oidc_auth_handler(self.oidc_audience)]
+            return []
     """
 
     def handler(request):

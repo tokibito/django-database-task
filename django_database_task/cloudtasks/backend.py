@@ -55,21 +55,3 @@ class CloudTasksDatabaseBackend(DatabaseTaskBackend):
     def client(self):
         """The Cloud Tasks client."""
         return self.broker.client
-
-    def get_auth_handler(self):
-        """
-        Get the OIDC authentication handler for task execution endpoints.
-
-        .. deprecated:: 0.4
-            Use get_auth_handlers(), which also returns the handlers built
-            from the AUTH_HANDLERS option. This method is removed in 0.5.
-
-        Returns:
-            Callable or None
-        """
-        handlers = self.broker.get_auth_handlers()
-        return handlers[0] if handlers else None
-
-    # A shim over the broker rather than a project's own override, so it
-    # does not trigger the deprecation warning or count twice.
-    get_auth_handler._is_library_auth_handler = True
