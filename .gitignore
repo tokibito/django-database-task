@@ -116,6 +116,7 @@ dmypy.json
 
 # Project specific
 django-6.0/
+django-6.1/
 examples/db.sqlite3
 .claude/
 plans/
