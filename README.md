@@ -733,7 +733,8 @@ User=app
 WorkingDirectory=/srv/app
 Environment=DJANGO_SETTINGS_MODULE=myproject.settings
 ExecStart=/usr/bin/flock -n --conflict-exit-code 3 /var/lock/ddt-worker.lock \
-    /srv/app/venv/bin/python manage.py run_database_tasks --failed-exit-code=1
+    /srv/app/venv/bin/python manage.py run_database_tasks \
+        --empty-exit-code=4 --failed-exit-code=1
 
 # An idle run and an overlapping run are both expected, not failures.
 SuccessExitStatus=3 4
