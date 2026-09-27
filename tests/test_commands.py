@@ -552,6 +552,21 @@ class TestBrokerSource:
         assert broker.acked == [str(result.id)]
         assert broker.nacked == []
 
+    def test_a_task_that_cannot_be_imported_is_acknowledged(self):
+        """It is FAILED in the database, so redelivering would repeat it."""
+        result = simple_task.enqueue(1, 1)
+        DatabaseTask.objects.filter(id=result.id).update(
+            task_path="tests.tasks.removed_task"
+        )
+        broker = FakePullBroker(batches=[[BrokerMessage(str(result.id))]])
+
+        output = run_worker(make_backend(broker), source="broker")
+
+        assert "Task failed" in output
+        assert DatabaseTask.objects.get(id=result.id).status == TaskResultStatus.FAILED
+        assert broker.acked == [str(result.id)]
+        assert broker.nacked == []
+
     def test_a_message_for_a_deleted_task_is_dropped(self):
         broker = FakePullBroker(
             batches=[[BrokerMessage("3f2a9c11-0000-4000-8000-000000000000")]]
@@ -861,20 +876,43 @@ class TestExitCodes:
 
     def test_a_task_the_worker_could_not_run_counts_as_failed(self):
         """
-        The task never gets as far as running -- its code cannot be
-        imported -- so nothing records it as FAILED except the worker.
+        The task never gets as far as running -- the database went away
+        under the worker -- so nothing records it as FAILED except the
+        worker. The task is still READY afterwards, so the run is capped
+        rather than left to fetch it again.
         """
         simple_task.enqueue(1, 2)
 
         with patch.object(
-            DatabaseTaskBackend, "_resolve_task", side_effect=ImportError("gone")
+            DatabaseTaskBackend,
+            "_claim_task",
+            side_effect=RuntimeError("database is down"),
         ):
             with pytest.raises(SystemExit) as exc_info:
                 call_command(
-                    "run_database_tasks", failed_exit_code=5, stdout=StringIO()
+                    "run_database_tasks",
+                    failed_exit_code=5,
+                    max_tasks=1,
+                    stdout=StringIO(),
                 )
 
         assert exc_info.value.code == 5
+
+    def test_a_task_that_cannot_be_imported_counts_as_failed(self):
+        """It is recorded FAILED without running and reported like one."""
+        result = simple_task.enqueue(1, 2)
+        DatabaseTask.objects.filter(id=result.id).update(
+            task_path="tests.tasks.removed_task"
+        )
+        out = StringIO()
+
+        with pytest.raises(SystemExit) as exc_info:
+            call_command("run_database_tasks", failed_exit_code=5, stdout=out)
+
+        assert exc_info.value.code == 5
+        assert "Task failed" in out.getvalue()
+        assert "Total tasks processed: 1" in out.getvalue()
+        assert DatabaseTask.objects.get(id=result.id).status == TaskResultStatus.FAILED
 
     def test_success_after_a_failure_still_reports_the_failure(self):
         failing_task.enqueue()
@@ -946,7 +984,9 @@ class TestBrokerExitCodes:
         backend = make_backend(broker)
 
         with patch.object(
-            DatabaseTaskBackend, "_resolve_task", side_effect=ImportError("gone")
+            DatabaseTaskBackend,
+            "_claim_task",
+            side_effect=RuntimeError("database is down"),
         ):
             with pytest.raises(SystemExit) as exc_info:
                 run_worker(

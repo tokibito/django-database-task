@@ -320,6 +320,14 @@ class DatabaseTaskBackend(BaseTaskBackend):
         that fetched the same READY row cannot both run it: whichever claims
         second gets None and runs nothing.
 
+        A task whose function cannot be imported (the module was renamed,
+        the function removed, the worker runs older code than the enqueuer)
+        is recorded as FAILED with the traceback, the same as a task that
+        raised, so it does not sit in RUNNING with nothing to explain it. The
+        ``task_started`` and ``task_finished`` signals are not sent for it,
+        since there is no task object to send them with; the ERROR record
+        ``Task could not be started`` reports it instead.
+
         Args:
             db_task: The :class:`~django_database_task.models.DatabaseTask`
                 to run. It must be READY.
@@ -328,7 +336,8 @@ class DatabaseTaskBackend(BaseTaskBackend):
         Returns:
             TaskResult after execution, or None if the task was no longer
             READY (another worker claimed it, or it was deleted) and so was
-            not run here.
+            not run here. The result of a task that could not be started has
+            ``task`` set to None.
         """
         if not self._claim_task(db_task, worker_id):
             logger.info(
@@ -339,16 +348,36 @@ class DatabaseTaskBackend(BaseTaskBackend):
             )
             return None
 
-        task = self._resolve_task(db_task.task_path)
-        task_result = self._db_task_to_result(db_task, task)
-        log_fields = task_log_fields(db_task, worker_id)
-        logger.info(
-            "Task started: id=%s path=%s",
-            db_task.id,
-            db_task.task_path,
-            extra=log_fields,
-        )
-        task_started.send(sender=self.__class__, task_result=task_result)
+        # Past the RUNNING write but before the block that records failures,
+        # so an error here would otherwise leave the task RUNNING with no
+        # error, and no other worker would take it.
+        task = None
+        try:
+            task = self._resolve_task(db_task.task_path)
+            task_result = self._db_task_to_result(db_task, task)
+            logger.info(
+                "Task started: id=%s path=%s",
+                db_task.id,
+                db_task.task_path,
+                extra=task_log_fields(db_task, worker_id),
+            )
+            task_started.send(sender=self.__class__, task_result=task_result)
+        except Exception as e:
+            error = self._record_error(db_task, e)
+            db_task.refresh_from_db()
+            logger.exception(
+                "Task could not be started: id=%s path=%s error=%s",
+                db_task.id,
+                db_task.task_path,
+                error.exception_class_path,
+                extra=task_log_fields(
+                    db_task,
+                    worker_id,
+                    status=str(TaskResultStatus.FAILED),
+                    error_class=error.exception_class_path,
+                ),
+            )
+            return self._db_task_to_result(db_task, task)
 
         # Wall time of the run itself, kept apart from started_at/finished_at
         # because those are database timestamps and can be rewritten.

@@ -251,6 +251,109 @@ class TestTaskClaim:
 
 
 @pytest.mark.django_db
+class TestTaskStartFailure:
+    """Tests for a task whose function cannot be resolved after the claim."""
+
+    @pytest.mark.parametrize(
+        "task_path, error_class, named_in_traceback",
+        [
+            ("tests.tasks.removed_task", "builtins.AttributeError", "removed_task"),
+            (
+                "tests.renamed_module.simple_task",
+                "builtins.ModuleNotFoundError",
+                "tests.renamed_module",
+            ),
+        ],
+    )
+    def test_a_task_that_cannot_be_imported_is_failed(
+        self, task_path, error_class, named_in_traceback
+    ):
+        """Recorded like a task that raised, not left RUNNING."""
+        result = simple_task.enqueue(1, 2)
+        DatabaseTask.objects.filter(id=result.id).update(task_path=task_path)
+        db_task = DatabaseTask.objects.get(id=result.id)
+
+        final_result = task_backends["default"].run_task(db_task, worker_id="w")
+
+        assert final_result.status == TaskResultStatus.FAILED
+        assert final_result.task is None
+        (error,) = final_result.errors
+        assert error.exception_class_path == error_class
+        assert named_in_traceback in error.traceback
+
+        db_task.refresh_from_db()
+        assert db_task.status == TaskResultStatus.FAILED
+        assert db_task.finished_at is not None
+        assert db_task.worker_ids_json == ["w"]
+        assert [e["exception_class_path"] for e in db_task.errors_json] == [error_class]
+
+    def test_no_lifecycle_signal_is_sent_for_it(self):
+        """There is no task object to put in the signals' result."""
+        from django.tasks.signals import task_finished, task_started
+
+        result = simple_task.enqueue(1, 2)
+        DatabaseTask.objects.filter(id=result.id).update(
+            task_path="tests.tasks.removed_task"
+        )
+        db_task = DatabaseTask.objects.get(id=result.id)
+        sent = []
+
+        def receiver(sender, task_result, **kwargs):
+            sent.append(task_result)
+
+        task_started.connect(receiver)
+        task_finished.connect(receiver)
+        try:
+            task_backends["default"].run_task(db_task, worker_id="w")
+        finally:
+            task_started.disconnect(receiver)
+            task_finished.disconnect(receiver)
+
+        assert sent == []
+
+    def test_a_failing_task_started_receiver_fails_the_task(self):
+        """An error between the claim and the run must not leave RUNNING."""
+        from django.tasks.signals import task_started
+
+        result = simple_task.enqueue(1, 2)
+        db_task = DatabaseTask.objects.get(id=result.id)
+
+        def receiver(sender, task_result, **kwargs):
+            raise RuntimeError("receiver broke")
+
+        task_started.connect(receiver)
+        try:
+            final_result = task_backends["default"].run_task(db_task, worker_id="w")
+        finally:
+            task_started.disconnect(receiver)
+
+        assert final_result.status == TaskResultStatus.FAILED
+        assert final_result.task is simple_task
+        db_task.refresh_from_db()
+        assert db_task.status == TaskResultStatus.FAILED
+        assert db_task.errors_json[0]["exception_class_path"] == "builtins.RuntimeError"
+
+    def test_the_error_history_is_kept(self):
+        """A retry that fails the same way adds to the record."""
+        result = simple_task.enqueue(1, 2)
+        DatabaseTask.objects.filter(id=result.id).update(
+            task_path="tests.tasks.removed_task",
+            errors_json=[
+                {"exception_class_path": "builtins.ValueError", "traceback": ""}
+            ],
+        )
+        db_task = DatabaseTask.objects.get(id=result.id)
+
+        task_backends["default"].run_task(db_task, worker_id="w")
+
+        db_task.refresh_from_db()
+        assert [e["exception_class_path"] for e in db_task.errors_json] == [
+            "builtins.ValueError",
+            "builtins.AttributeError",
+        ]
+
+
+@pytest.mark.django_db
 class TestJsonSerialization:
     """Tests for JSON serialization validation."""
 
