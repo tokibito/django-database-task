@@ -419,25 +419,7 @@ class DatabaseTaskBackend(BaseTaskBackend):
             return final_result
 
         except Exception as e:
-            # Failure
-            error = TaskError(
-                exception_class_path=f"{type(e).__module__}.{type(e).__qualname__}",
-                traceback=traceback.format_exc(),
-            )
-            errors = db_task.errors_json.copy()
-            errors.append(
-                {
-                    "exception_class_path": error.exception_class_path,
-                    "traceback": error.traceback,
-                }
-            )
-
-            db_task.status = TaskResultStatus.FAILED
-            db_task.errors_json = errors
-            db_task.finished_at = timezone.now()
-            db_task.save(
-                update_fields=["status", "errors_json", "finished_at", "updated_at"]
-            )
+            error = self._record_error(db_task, e)
 
             # Send signal for failure (with exception context for Django's logging)
             db_task.refresh_from_db()
@@ -457,6 +439,36 @@ class DatabaseTaskBackend(BaseTaskBackend):
             )
             task_finished.send(sender=self.__class__, task_result=final_result)
             return final_result
+
+    def _record_error(self, db_task, exc):
+        """
+        Mark ``db_task`` FAILED with ``exc`` appended to its errors.
+
+        Must be called from the ``except`` block handling ``exc``, so the
+        traceback recorded is the one being handled.
+
+        Returns:
+            TaskError describing ``exc``, as stored on the task.
+        """
+        error = TaskError(
+            exception_class_path=f"{type(exc).__module__}.{type(exc).__qualname__}",
+            traceback=traceback.format_exc(),
+        )
+        errors = db_task.errors_json.copy()
+        errors.append(
+            {
+                "exception_class_path": error.exception_class_path,
+                "traceback": error.traceback,
+            }
+        )
+
+        db_task.status = TaskResultStatus.FAILED
+        db_task.errors_json = errors
+        db_task.finished_at = timezone.now()
+        db_task.save(
+            update_fields=["status", "errors_json", "finished_at", "updated_at"]
+        )
+        return error
 
     def _claim_task(self, db_task, worker_id):
         """
