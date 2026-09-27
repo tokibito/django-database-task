@@ -663,7 +663,10 @@ hold at once, and `--failed-exit-code` wins.
 What counts as a failure:
 
 - a task that ran and ended `FAILED`
-- a task the worker could not run at all (its code no longer imports, say)
+- a task whose function could not be imported (it is recorded `FAILED`
+  without running)
+- a task the worker could not run at all (the database went away under it,
+  say)
 
 What does not:
 
@@ -827,8 +830,18 @@ process exits with.
 | `Task started` | INFO | Immediately before the task function is called |
 | `Task completed successfully` | INFO | The task returned |
 | `Task failed` | ERROR | The task raised |
+| `Task could not be started` | ERROR | The task function could not be imported; the task is `FAILED` without running |
 | `Worker could not run task` | ERROR | The worker never got the task running |
 | `Worker finished` | INFO | The loop has ended, with the counts and exit code |
+
+A task whose function no longer imports — the module was renamed, the function
+removed, or the worker runs older code than the process that enqueued it — is
+recorded `FAILED` with the traceback in its errors, the same as a task that
+raised, so it shows up in the admin as failed rather than sitting in `RUNNING`.
+Once the code is deployed, *Retry failed tasks* in the admin runs it. Django's
+`task_started` and `task_finished` signals are not sent for it, since there is
+no task object to send them with: a monitor connected to those signals sees it
+only through the `Task could not be started` record.
 
 The standard library has no JSON formatter, so bring your own. This one has no
 dependencies and merges whatever the library attached:

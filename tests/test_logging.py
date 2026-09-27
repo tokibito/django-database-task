@@ -131,17 +131,42 @@ class TestTaskLifecycleLogging:
         assert task.worker_id == started.worker_id
 
     def test_a_task_the_worker_could_not_run_is_logged(self, task_logs):
+        """
+        The database went away under the worker. The task is still READY
+        afterwards, so the run is capped rather than left to fetch it again.
+        """
         result = simple_task.enqueue(1, 2)
 
         with patch.object(
-            DatabaseTaskBackend, "_resolve_task", side_effect=ImportError("gone")
+            DatabaseTaskBackend,
+            "_claim_task",
+            side_effect=RuntimeError("database is down"),
         ):
-            call_command("run_database_tasks", stdout=StringIO())
+            call_command("run_database_tasks", max_tasks=1, stdout=StringIO())
 
         (record,) = records_matching(task_logs, "Worker could not run task")
         assert record.levelno == logging.ERROR
         assert record.task_id == str(result.id)
         assert record.exc_info is not None
+
+    def test_a_task_that_could_not_be_started_is_logged(self, task_logs):
+        """The task function no longer imports; the task is FAILED unrun."""
+        result = simple_task.enqueue(1, 2)
+        DatabaseTask.objects.filter(id=result.id).update(
+            task_path="tests.tasks.removed_task"
+        )
+
+        call_command("run_database_tasks", stdout=StringIO())
+
+        (record,) = records_matching(task_logs, "Task could not be started")
+        assert record.levelno == logging.ERROR
+        assert record.task_id == str(result.id)
+        assert record.task_path == "tests.tasks.removed_task"
+        assert record.status == TaskResultStatus.FAILED.value
+        assert record.error_class == "builtins.AttributeError"
+        assert record.exc_info is not None
+        assert records_matching(task_logs, "Worker could not run task") == []
+        assert records_matching(task_logs, "Task started") == []
 
 
 @pytest.mark.django_db

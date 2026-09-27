@@ -17,6 +17,23 @@
   counts it as skipped. Existing projects need no changes; a project calling
   `backend.run_task()` directly should expect `None` for a task another
   worker claimed first.
+- A task whose function could not be imported (the module was renamed, the
+  function removed, a worker running older code than the enqueuer) was left
+  `RUNNING` with no error recorded. `run_task()` wrote `RUNNING` and then
+  raised out of the import, before the block that records a failure, so
+  nothing told the task apart from one held by a live worker until
+  `requeue_stale_database_tasks` requeued it for the next worker to fail on
+  in the same way, and a broker redelivered its message for as long as that
+  went on. It is now recorded `FAILED` with the traceback in its errors and
+  `finished_at` set, the same as a task that raised: the admin shows the
+  error, *Retry failed tasks* runs it again once the code is fixed, and the
+  broker message is acknowledged. The ERROR record `Task could not be
+  started` reports it, with `status` and `error_class`, in place of the
+  worker's `Worker could not run task`, which is now only logged when the
+  worker itself fails (a database error during the claim, say). The
+  `task_started` and `task_finished` signals are not sent for such a task,
+  since there is no task object to send them with. Existing projects need
+  no changes.
 
 ## 0.5.0
 
