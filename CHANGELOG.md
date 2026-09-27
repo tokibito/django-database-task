@@ -35,6 +35,13 @@
   since there is no task object to send them with. Existing projects need
   no changes.
 
+### Documentation
+
+- The timer-driven systemd unit in the README lists 4 in `SuccessExitStatus`
+  as the code for an idle run, but its `ExecStart` did not pass
+  `--empty-exit-code=4`, so an idle run exited 0 and the 4 never occurred.
+  The `ExecStart` line now passes it, matching the `flock` example above it.
+
 ## 0.5.0
 
 ### Added
