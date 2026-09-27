@@ -115,6 +115,27 @@ class TestRunSelectedTasksAction:
         # Check message contains "failed"
         assert any("failed" in str(m) for m in request._messages.messages)
 
+    def test_a_task_a_worker_took_meanwhile_is_skipped(
+        self, model_admin, request_factory, admin_user, monkeypatch
+    ):
+        """A task a worker claimed after the action read it counts as skipped."""
+        result = simple_task.enqueue(1, 2)
+        monkeypatch.setattr(
+            "django_database_task.backends.DatabaseTaskBackend.run_task",
+            lambda self, db_task, worker_id=None: None,
+        )
+
+        request = request_factory.post("/admin/")
+        request.user = admin_user
+        request._messages = MockMessages()
+
+        queryset = DatabaseTask.objects.filter(id=result.id)
+        model_admin.run_selected_tasks(request, queryset)
+
+        messages = [str(m) for m in request._messages.messages]
+        assert any("1 skipped" in m for m in messages)
+        assert not any("failed" in m for m in messages)
+
 
 @pytest.mark.django_db
 class TestRetryFailedTasksAction:

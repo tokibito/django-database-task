@@ -40,7 +40,7 @@ sequenceDiagram
     Note over App,Worker: Task Execution
     Worker->>DB: SELECT FOR UPDATE SKIP LOCKED<br/>(status=READY, run_after <= now)
     DB-->>Worker: Task record (with lock)
-    Worker->>DB: UPDATE status=RUNNING
+    Worker->>DB: UPDATE status=RUNNING<br/>(only if still READY)
     Worker->>Worker: Execute task function
     alt Success
         Worker->>DB: UPDATE status=SUCCESSFUL,<br/>return_value, finished_at
@@ -1495,7 +1495,7 @@ sequenceDiagram
         DB-->>Worker: Notification (task_id, queue_name)
         alt A notification arrives
             Worker->>DB: SELECT FOR UPDATE SKIP LOCKED<br/>(id=task_id, status=READY)
-            Worker->>DB: UPDATE status=RUNNING
+            Worker->>DB: UPDATE status=RUNNING<br/>(only if still READY)
             Worker->>Worker: Execute task function
             Worker->>DB: UPDATE status=SUCCESSFUL / FAILED
         else The wait times out
@@ -1690,7 +1690,7 @@ sequenceDiagram
     Handler->>Handler: Verify OIDC token (optional)
     Handler->>DB: SELECT task by ID
     DB-->>Handler: Task record
-    Handler->>DB: UPDATE status=RUNNING
+    Handler->>DB: UPDATE status=RUNNING<br/>(only if still READY)
     Handler->>Handler: Execute task function
     alt Success
         Handler->>DB: UPDATE status=SUCCESSFUL
@@ -1897,7 +1897,7 @@ sequenceDiagram
         alt A message is waiting
             SQS-->>Worker: task_id + ReceiptHandle
             Worker->>DB: SELECT FOR UPDATE SKIP LOCKED<br/>(id=task_id, status=READY)
-            Worker->>DB: UPDATE status=RUNNING
+            Worker->>DB: UPDATE status=RUNNING<br/>(only if still READY)
             Worker->>Worker: Execute task function
             Worker->>DB: UPDATE status=SUCCESSFUL / FAILED
             Worker->>SQS: DeleteMessage (only now)

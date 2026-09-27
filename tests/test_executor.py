@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from django_database_task import (
     GracefulShutdown,
+    executor,
     fetch_task,
     get_pending_task_count,
     process_one_task,
@@ -187,6 +188,50 @@ class TestProcessOneTask:
 
         db_task.refresh_from_db()
         assert "test-worker-123" in db_task.worker_ids_json
+
+    def test_process_one_task_moves_on_when_another_worker_has_the_task(
+        self, monkeypatch
+    ):
+        """A task claimed between the fetch and the run is not an empty queue."""
+        taken = DatabaseTask.objects.create(
+            task_path="tests.test_executor.sample_task",
+            queue_name="default",
+            priority=0,
+            args_json=[1, 2],
+            kwargs_json={},
+            status=TaskResultStatus.READY,
+            enqueued_at=timezone.now(),
+            backend_name="default",
+        )
+        free = DatabaseTask.objects.create(
+            task_path="tests.test_executor.sample_task",
+            queue_name="default",
+            priority=0,
+            args_json=[3, 4],
+            kwargs_json={},
+            status=TaskResultStatus.READY,
+            enqueued_at=timezone.now(),
+            backend_name="default",
+        )
+        # What this worker fetched, before the other worker moved the row on.
+        stale = DatabaseTask.objects.get(id=taken.id)
+        DatabaseTask.objects.filter(id=taken.id).update(
+            status=TaskResultStatus.RUNNING, worker_ids_json=["other-worker"]
+        )
+        real_fetch_task = executor.fetch_task
+        fetches = iter([lambda **kwargs: stale, real_fetch_task])
+        monkeypatch.setattr(
+            executor, "fetch_task", lambda **kwargs: next(fetches)(**kwargs)
+        )
+
+        result = process_one_task(worker_id="this-worker")
+
+        assert result is not None
+        assert result.id == str(free.id)
+        assert result.return_value == 7
+        taken.refresh_from_db()
+        assert taken.status == TaskResultStatus.RUNNING
+        assert taken.worker_ids_json == ["other-worker"]
 
 
 @pytest.mark.django_db

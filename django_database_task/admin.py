@@ -130,19 +130,22 @@ class DatabaseTaskAdmin(admin.ModelAdmin):
 
         success_count = 0
         fail_count = 0
+        skipped_count = queryset.count() - ready_count
 
         for db_task in ready_tasks:
             try:
                 backend = task_backends[db_task.backend_name]
                 result = backend.run_task(db_task, worker_id="admin")
-                if result.status == TaskResultStatus.SUCCESSFUL:
+                if result is None:
+                    # A worker claimed it after the action read it.
+                    skipped_count += 1
+                elif result.status == TaskResultStatus.SUCCESSFUL:
                     success_count += 1
                 else:
                     fail_count += 1
             except Exception:
                 fail_count += 1
 
-        skipped_count = queryset.count() - ready_count
         msg_parts = []
         if success_count:
             msg_parts.append(f"{success_count} succeeded")
@@ -189,7 +192,7 @@ class DatabaseTaskAdmin(admin.ModelAdmin):
                     backend = task_backends[db_task.backend_name]
                     result = backend.run_task(db_task, worker_id="admin-retry")
 
-                if result.status == TaskResultStatus.SUCCESSFUL:
+                if result is not None and result.status == TaskResultStatus.SUCCESSFUL:
                     success_count += 1
                 else:
                     fail_count += 1

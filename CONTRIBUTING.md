@@ -54,8 +54,10 @@ venv/bin/pytest -k "broker and auth"
 
 `tests/postgres/test_listen_notify.py` runs the LISTEN/NOTIFY broker against a
 real server, which is the only way to check that a notification arrives, that
-it arrives on commit and not before, and that the driver hands it over. SQLite
-cannot answer any of that, so on SQLite the module skips.
+it arrives on commit and not before, and that the driver hands it over.
+`tests/postgres/test_claim.py` puts workers on separate connections to check
+that the row lock keeps two of them from running the same task. SQLite cannot
+answer any of that, so on SQLite both modules skip.
 
 Point the suite at a server with `DJANGO_DATABASE_ENGINE`:
 

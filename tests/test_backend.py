@@ -10,10 +10,12 @@ from django.utils import timezone
 
 from django_database_task.models import DatabaseTask
 
+from . import tasks as test_tasks
 from .tasks import (
     async_failing_task,
     async_task,
     context_task,
+    counting_task,
     failing_task,
     high_priority_task,
     simple_task,
@@ -163,6 +165,89 @@ class TestTaskExecution:
         assert db_task.finished_at is not None
         assert db_task.last_attempted_at is not None
         assert db_task.started_at <= db_task.finished_at
+
+
+@pytest.mark.django_db
+class TestTaskClaim:
+    """run_task() runs a task only if it is the one to move it out of READY."""
+
+    def test_a_task_handed_to_two_workers_runs_once(self):
+        """The second worker to claim the same READY row runs nothing."""
+        test_tasks.counting_task_runs.clear()
+        result = counting_task.enqueue()
+        first = DatabaseTask.objects.get(id=result.id)
+        second = DatabaseTask.objects.get(id=result.id)
+
+        backend = task_backends["default"]
+        first_result = backend.run_task(first, worker_id="worker-1")
+        second_result = backend.run_task(second, worker_id="worker-2")
+
+        assert first_result.status == TaskResultStatus.SUCCESSFUL
+        assert second_result is None
+        assert test_tasks.counting_task_runs == [1]
+
+        db_task = DatabaseTask.objects.get(id=result.id)
+        assert db_task.status == TaskResultStatus.SUCCESSFUL
+        assert db_task.worker_ids_json == ["worker-1"]
+
+    def test_a_task_that_is_no_longer_ready_is_not_run(self):
+        """A row that left READY after it was fetched is left alone."""
+        test_tasks.counting_task_runs.clear()
+        result = counting_task.enqueue()
+        db_task = DatabaseTask.objects.get(id=result.id)
+        DatabaseTask.objects.filter(id=result.id).update(
+            status=TaskResultStatus.RUNNING, worker_ids_json=["worker-1"]
+        )
+
+        backend = task_backends["default"]
+        assert backend.run_task(db_task, worker_id="worker-2") is None
+
+        assert test_tasks.counting_task_runs == []
+        db_task.refresh_from_db()
+        assert db_task.status == TaskResultStatus.RUNNING
+        assert db_task.worker_ids_json == ["worker-1"]
+
+    def test_a_deleted_task_is_not_run(self):
+        """A row purged after it was fetched is not resurrected."""
+        test_tasks.counting_task_runs.clear()
+        result = counting_task.enqueue()
+        db_task = DatabaseTask.objects.get(id=result.id)
+        DatabaseTask.objects.filter(id=result.id).delete()
+
+        backend = task_backends["default"]
+        assert backend.run_task(db_task, worker_id="worker-1") is None
+
+        assert test_tasks.counting_task_runs == []
+        assert not DatabaseTask.objects.filter(id=result.id).exists()
+
+    def test_the_worker_id_is_appended_to_the_stored_list(self):
+        """An attempt recorded after the row was loaded is kept."""
+        result = simple_task.enqueue(1, 1)
+        db_task = DatabaseTask.objects.get(id=result.id)
+        # A worker that died, its attempt recorded by requeue_stale_tasks
+        # while this worker was holding an older copy of the row.
+        DatabaseTask.objects.filter(id=result.id).update(worker_ids_json=["worker-1"])
+
+        backend = task_backends["default"]
+        final_result = backend.run_task(db_task, worker_id="worker-2")
+
+        assert final_result.worker_ids == ["worker-1", "worker-2"]
+        db_task.refresh_from_db()
+        assert db_task.worker_ids_json == ["worker-1", "worker-2"]
+
+    def test_started_at_of_an_earlier_attempt_is_kept(self):
+        """started_at marks the first attempt, not the latest one."""
+        result = simple_task.enqueue(1, 1)
+        db_task = DatabaseTask.objects.get(id=result.id)
+        earlier = timezone.now() - timedelta(hours=1)
+        DatabaseTask.objects.filter(id=result.id).update(started_at=earlier)
+
+        backend = task_backends["default"]
+        backend.run_task(db_task, worker_id="worker-2")
+
+        db_task.refresh_from_db()
+        assert db_task.started_at == earlier
+        assert db_task.last_attempted_at > earlier
 
 
 @pytest.mark.django_db
