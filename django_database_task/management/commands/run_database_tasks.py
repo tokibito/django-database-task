@@ -354,11 +354,13 @@ class Command(BaseCommand):
             if use_database and not worked:
                 task = fetch_task(queue_name=queue_name, backend_name=backend_name)
                 if task is not None:
-                    self._run_database_task(backend, task, worker_id, verbosity)
-                    tasks_processed += 1
                     worked = True
-                    if self._reached_max_tasks(tasks_processed, max_tasks, verbosity):
-                        break
+                    if self._run_database_task(backend, task, worker_id, verbosity):
+                        tasks_processed += 1
+                        if self._reached_max_tasks(
+                            tasks_processed, max_tasks, verbosity
+                        ):
+                            break
 
             if worked:
                 continue
@@ -400,7 +402,13 @@ class Command(BaseCommand):
         return True
 
     def _run_database_task(self, backend, task, worker_id, verbosity):
-        """Run a task fetched straight from the database."""
+        """
+        Run a task fetched straight from the database.
+
+        Returns:
+            True if the task was run here, False if another worker claimed
+            it between the fetch and the run and so it was not.
+        """
         if verbosity >= 1:
             self.stdout.write(f"\nProcessing task: {task.id} ({task.task_path})")
 
@@ -415,11 +423,17 @@ class Command(BaseCommand):
             )
             self.stdout.write(self.style.ERROR(f"  Error running task: {e}"))
             self.tasks_failed += 1
-            return
+            return True
+
+        if result is None:
+            if verbosity >= 1:
+                self.stdout.write("  Task is not ready to run; nothing to do")
+            return False
 
         if result.status != TaskResultStatus.SUCCESSFUL:
             self.tasks_failed += 1
         self._report_result(result.status, verbosity)
+        return True
 
     def _receive_and_run(
         self, broker, queue_name, worker_id, wait_seconds, max_messages, verbosity

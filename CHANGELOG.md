@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A task could run twice when more than one worker polled the same queue.
+  `fetch_task()` took the row with `SELECT FOR UPDATE SKIP LOCKED` but
+  released the lock on return, and `run_task()` then wrote `RUNNING` without
+  checking the status, so a second worker that fetched the row in between ran
+  the same task, and its worker id overwrote the first attempt's. `run_task()`
+  now moves the row from `READY` to `RUNNING` inside a locked transaction that
+  re-checks the status, appends the worker id to the list stored in the
+  database, and returns `None` instead of running a task that is no longer
+  `READY`. `process_one_task()` moves on to the next task in that case,
+  `run_database_tasks` reports it without counting it, and the admin action
+  counts it as skipped. Existing projects need no changes; a project calling
+  `backend.run_task()` directly should expect `None` for a task another
+  worker claimed first.
+
 ## 0.5.0
 
 ### Added

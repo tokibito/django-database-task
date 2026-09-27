@@ -8,6 +8,7 @@ from importlib import import_module
 from inspect import iscoroutinefunction
 
 from django.core.exceptions import ImproperlyConfigured
+from django.db import transaction
 from django.tasks.backends.base import BaseTaskBackend
 from django.tasks.base import Task, TaskContext, TaskError, TaskResult, TaskResultStatus
 from django.tasks.exceptions import TaskResultDoesNotExist
@@ -311,28 +312,32 @@ class DatabaseTaskBackend(BaseTaskBackend):
         return result
 
     def run_task(self, db_task, worker_id=None):
-        """Execute a task (called from management command)."""
+        """
+        Claim a task and execute it (called from the executor and the
+        management command).
 
-        now = timezone.now()
+        The task is claimed with :meth:`_claim_task` first, so two workers
+        that fetched the same READY row cannot both run it: whichever claims
+        second gets None and runs nothing.
 
-        # Update status to RUNNING
-        worker_ids = db_task.worker_ids_json.copy()
-        if worker_id:
-            worker_ids.append(worker_id)
+        Args:
+            db_task: The :class:`~django_database_task.models.DatabaseTask`
+                to run. It must be READY.
+            worker_id: Optional worker identifier, recorded on the task.
 
-        db_task.status = TaskResultStatus.RUNNING
-        db_task.started_at = db_task.started_at or now
-        db_task.last_attempted_at = now
-        db_task.worker_ids_json = worker_ids
-        db_task.save(
-            update_fields=[
-                "status",
-                "started_at",
-                "last_attempted_at",
-                "worker_ids_json",
-                "updated_at",
-            ]
-        )
+        Returns:
+            TaskResult after execution, or None if the task was no longer
+            READY (another worker claimed it, or it was deleted) and so was
+            not run here.
+        """
+        if not self._claim_task(db_task, worker_id):
+            logger.info(
+                "Task not run: id=%s path=%s is no longer READY",
+                db_task.id,
+                db_task.task_path,
+                extra=task_log_fields(db_task, worker_id),
+            )
+            return None
 
         task = self._resolve_task(db_task.task_path)
         task_result = self._db_task_to_result(db_task, task)
@@ -452,3 +457,59 @@ class DatabaseTaskBackend(BaseTaskBackend):
             )
             task_finished.send(sender=self.__class__, task_result=final_result)
             return final_result
+
+    def _claim_task(self, db_task, worker_id):
+        """
+        Move a READY task to RUNNING and record the attempt on it.
+
+        The row is locked and its status re-checked inside one transaction,
+        so of two workers holding the same READY row exactly one gets to
+        write RUNNING. The worker id is appended to the list stored in the
+        database rather than to the copy on ``db_task``, so an attempt
+        recorded after ``db_task`` was loaded is kept.
+
+        Returns:
+            True if this call claimed the task, False if it was no longer
+            READY. On True, ``db_task`` carries what was written.
+        """
+        from .models import DatabaseTask
+
+        now = timezone.now()
+
+        with transaction.atomic():
+            stored = (
+                DatabaseTask.objects.select_for_update(skip_locked=True)
+                .filter(id=db_task.id, status=TaskResultStatus.READY)
+                .first()
+            )
+            if stored is None:
+                return False
+
+            worker_ids = list(stored.worker_ids_json)
+            if worker_id:
+                worker_ids.append(worker_id)
+            started_at = stored.started_at or now
+
+            claimed = DatabaseTask.objects.filter(
+                id=db_task.id,
+                # Re-checked in the UPDATE itself: on a database without row
+                # locking another worker may have claimed the task between
+                # the SELECT above and here.
+                status=TaskResultStatus.READY,
+            ).update(
+                status=TaskResultStatus.RUNNING,
+                started_at=started_at,
+                last_attempted_at=now,
+                worker_ids_json=worker_ids,
+                updated_at=now,
+            )
+
+        if not claimed:
+            return False
+
+        db_task.status = TaskResultStatus.RUNNING
+        db_task.started_at = started_at
+        db_task.last_attempted_at = now
+        db_task.worker_ids_json = worker_ids
+        db_task.updated_at = now
+        return True

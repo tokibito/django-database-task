@@ -5,6 +5,9 @@ from django.tasks import task
 #: Set by ``record_sigterm_handler_task`` while it runs.
 recorded_sigterm_handler = None
 
+#: Appended to by ``counting_task`` each time it runs.
+counting_task_runs = []
+
 
 @task
 def simple_task(x, y):
@@ -16,6 +19,13 @@ def simple_task(x, y):
 def failing_task():
     """Task that always fails."""
     raise ValueError("This task always fails")
+
+
+@task
+def counting_task():
+    """Task that records that it ran."""
+    counting_task_runs.append(1)
+    return len(counting_task_runs)
 
 
 @task(priority=10)

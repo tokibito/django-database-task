@@ -575,6 +575,27 @@ class TestBrokerSource:
         assert broker.acked == [str(result.id)]
         assert "Total tasks processed: 0" in output
 
+    def test_a_task_another_worker_claimed_is_not_counted(self, monkeypatch):
+        """The database source moves past a task claimed after the fetch."""
+        result = simple_task.enqueue(1, 1)
+        stale = DatabaseTask.objects.get(id=result.id)
+        DatabaseTask.objects.filter(id=result.id).update(
+            status=TaskResultStatus.RUNNING, worker_ids_json=["other-worker"]
+        )
+        fetches = iter([stale, None])
+        monkeypatch.setattr(
+            "django_database_task.management.commands.run_database_tasks.fetch_task",
+            lambda **kwargs: next(fetches),
+        )
+
+        output = run_worker(make_backend(), source="db")
+
+        assert "not ready to run" in output
+        assert "Total tasks processed: 0" in output
+        stale.refresh_from_db()
+        assert stale.status == TaskResultStatus.RUNNING
+        assert stale.worker_ids_json == ["other-worker"]
+
     def test_a_worker_side_failure_returns_the_message(self, monkeypatch):
         """A broken worker must not swallow the task."""
         result = simple_task.enqueue(1, 1)

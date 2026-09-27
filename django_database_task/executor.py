@@ -49,10 +49,13 @@ def _generate_worker_id():
 
 def fetch_task(queue_name=None, backend_name="default"):
     """
-    Fetch and lock a single pending task with exclusive lock.
+    Fetch the next pending task.
 
-    This function uses SELECT FOR UPDATE SKIP LOCKED to safely
-    fetch a task without conflicts in multi-worker environments.
+    The row is read with SELECT FOR UPDATE SKIP LOCKED, so workers polling
+    the same queue at the same moment are handed different tasks. The lock
+    is released when this function returns: the task is claimed by
+    ``backend.run_task()``, which moves it to RUNNING only if it is still
+    READY and returns None if another worker got there first.
 
     Args:
         queue_name: Optional queue name to filter tasks.
@@ -104,13 +107,19 @@ def process_one_task(queue_name=None, backend_name="default", worker_id=None):
     if worker_id is None:
         worker_id = _generate_worker_id()
 
-    task = fetch_task(queue_name=queue_name, backend_name=backend_name)
-
-    if task is None:
-        return None
-
     backend = task_backends[backend_name]
-    return backend.run_task(task, worker_id=worker_id)
+
+    while True:
+        task = fetch_task(queue_name=queue_name, backend_name=backend_name)
+        if task is None:
+            return None
+
+        result = backend.run_task(task, worker_id=worker_id)
+        if result is not None:
+            return result
+        # Another worker claimed the task between the fetch and here. That
+        # task is taken care of; this worker is not done, so it looks for
+        # the next one rather than reporting an empty queue.
 
 
 def process_tasks(
@@ -226,8 +235,8 @@ def run_task_by_id(task_id, worker_id=None, allow_retry=False):
                      The task will be reset to READY before execution.
 
     Returns:
-        TaskResult if the task was executed, None if the task was not found
-        or not in an executable status.
+        TaskResult if the task was executed, None if the task was not in an
+        executable status, or another worker claimed it first.
 
     Raises:
         DatabaseTask.DoesNotExist: If no task with the given ID exists.
