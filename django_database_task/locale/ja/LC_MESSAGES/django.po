@@ -17,6 +17,18 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
+#: django_database_task/admin.py:82
+msgid "ID"
+msgstr "ID"
+
+#: django_database_task/admin.py:91
+msgid "Task"
+msgstr "タスク"
+
+#: django_database_task/admin.py:109
+msgid "Status"
+msgstr "ステータス"
+
 #: django_database_task/admin.py:117
 msgid "Run selected tasks"
 msgstr "選択したタスクを実行"

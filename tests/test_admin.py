@@ -5,7 +5,7 @@ from django.contrib.admin.sites import AdminSite
 from django.contrib.auth.models import User
 from django.tasks.base import TaskResultStatus
 from django.test import RequestFactory
-from django.utils import timezone
+from django.utils import timezone, translation
 
 from django_database_task.admin import DatabaseTaskAdmin
 from django_database_task.models import DatabaseTask
@@ -301,6 +301,23 @@ class TestRequeueStaleTasksAction:
         assert any(
             "No tasks in RUNNING status" in str(m) for m in request._messages.messages
         )
+
+
+class TestColumnHeaders:
+    @pytest.mark.parametrize(
+        ("name", "japanese"),
+        [
+            ("id_short", "ID"),
+            ("task_path_short", "タスク"),
+            ("status_badge", "ステータス"),
+        ],
+    )
+    def test_headers_are_translated(self, model_admin, name, japanese):
+        """The column headers follow the active language (#28)."""
+        header = getattr(model_admin, name).short_description
+
+        with translation.override("ja"):
+            assert str(header) == japanese
 
 
 class MockMessages:
