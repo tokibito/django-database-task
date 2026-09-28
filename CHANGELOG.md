@@ -56,6 +56,11 @@
   the messages are unchanged, so existing log filters keep matching;
   existing projects need no changes.
   ([#32](https://github.com/tokibito/django-database-task/issues/32))
+- The admin's "ID", "Task" and "Status" column headers stayed in English
+  under a Japanese locale, while the field names and action descriptions
+  around them were translated. They are now marked for translation and in
+  the Japanese catalogue. Existing projects need no changes.
+  ([#28](https://github.com/tokibito/django-database-task/issues/28))
 
 ### Documentation
 

@@ -79,7 +79,7 @@ class DatabaseTaskAdmin(admin.ModelAdmin):
         """Display shortened ID."""
         return str(obj.id)[:8]
 
-    id_short.short_description = "ID"
+    id_short.short_description = _("ID")
 
     def task_path_short(self, obj):
         """Display shortened task path."""
@@ -88,7 +88,7 @@ class DatabaseTaskAdmin(admin.ModelAdmin):
             return f"...{path[-37:]}"
         return path
 
-    task_path_short.short_description = "Task"
+    task_path_short.short_description = _("Task")
 
     def status_badge(self, obj):
         """Display status as a colored badge."""
@@ -106,7 +106,7 @@ class DatabaseTaskAdmin(admin.ModelAdmin):
             obj.status,
         )
 
-    status_badge.short_description = "Status"
+    status_badge.short_description = _("Status")
 
     actions = ["run_selected_tasks", "retry_failed_tasks", "requeue_stale_tasks"]
 
