@@ -102,8 +102,11 @@ A few things are easy to forget:
   ```
 
 - **Translations.** User-visible strings in `models.py` and `admin.py` go
-  through `gettext_lazy`, and there is a Japanese catalogue. Adding a string
-  means updating and compiling it, from inside the app directory:
+  through `gettext_lazy`, and there is a Japanese catalogue. The management
+  commands use `gettext` instead, because argparse cannot format a lazy
+  string; a command's `help` is a property so that it is translated when the
+  parser is built. Adding a string means updating and compiling the
+  catalogue, from inside the app directory:
 
   ```bash
   cd django_database_task

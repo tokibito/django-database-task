@@ -61,6 +61,14 @@
   around them were translated. They are now marked for translation and in
   the Japanese catalogue. Existing projects need no changes.
   ([#28](https://github.com/tokibito/django-database-task/issues/28))
+- The `--help` of `run_database_tasks`, `purge_completed_database_tasks` and
+  `requeue_stale_database_tasks` was in English under any locale: neither the
+  command descriptions nor the option help were marked for translation. They
+  are now in the Japanese catalogue, and are translated when the parser is
+  built rather than lazily, since argparse cannot format a lazy string. The
+  English text, the options and their defaults are unchanged, and so is what
+  the commands print while they run; existing projects need no changes.
+  ([#28](https://github.com/tokibito/django-database-task/issues/28))
 
 ### Documentation
 

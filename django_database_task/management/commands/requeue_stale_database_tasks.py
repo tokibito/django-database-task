@@ -2,6 +2,7 @@ import re
 from datetime import timedelta
 
 from django.core.management.base import BaseCommand, CommandError
+from django.utils.translation import gettext as _
 
 from django_database_task.executor import DEFAULT_MAX_ATTEMPTS, requeue_stale_tasks
 
@@ -44,17 +45,22 @@ def parse_older_than(value):
 
 
 class Command(BaseCommand):
-    help = (
-        "Recover tasks left in RUNNING status by a worker that was killed "
-        "before it could write a result"
-    )
+    @property
+    def help(self):
+        # argparse formats the description and the option help with a regex,
+        # which a lazy string cannot go through, so every string here is
+        # translated when the parser is built rather than at import time.
+        return _(
+            "Recover tasks left in RUNNING status by a worker that was killed "
+            "before it could write a result"
+        )
 
     def add_arguments(self, parser):
         parser.add_argument(
             "--older-than",
             type=str,
             required=True,
-            help=(
+            help=_(
                 "Only touch tasks that have been RUNNING for longer than this, "
                 "as a number and a unit: 90s, 15m, 2h, 1d. Required, and it "
                 "must be longer than your longest running task - a task still "
@@ -66,29 +72,30 @@ class Command(BaseCommand):
             "--queue",
             type=str,
             default=None,
-            help="Queue name to recover (all queues if not specified)",
+            help=_("Queue name to recover (all queues if not specified)"),
         )
         parser.add_argument(
             "--backend",
             type=str,
             default=None,
-            help="Backend name to recover (all backends if not specified)",
+            help=_("Backend name to recover (all backends if not specified)"),
         )
         parser.add_argument(
             "--max-attempts",
             type=int,
             default=DEFAULT_MAX_ATTEMPTS,
-            help=(
+            help=_(
                 "Mark a task FAILED instead of requeueing it once it has been "
-                f"handed to this many workers (0=no limit, default: "
-                f"{DEFAULT_MAX_ATTEMPTS}). Stops a task that kills its worker "
+                "handed to this many workers (0=no limit, default: "
+                "%(max_attempts)s). Stops a task that kills its worker "
                 "from being requeued forever"
-            ),
+            )
+            % {"max_attempts": DEFAULT_MAX_ATTEMPTS},
         )
         parser.add_argument(
             "--mark-failed",
             action="store_true",
-            help=(
+            help=_(
                 "Mark every stale task FAILED instead of requeueing it. For "
                 "tasks that are not safe to run twice"
             ),
@@ -96,7 +103,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--notify-broker",
             action="store_true",
-            help=(
+            help=_(
                 "Tell the backend's broker about each requeued task. Needed "
                 "when workers only receive from a broker, because the message "
                 "for the killed attempt is already gone"
@@ -106,12 +113,12 @@ class Command(BaseCommand):
             "--batch-size",
             type=int,
             default=1000,
-            help="Number of tasks to process at once (default: 1000)",
+            help=_("Number of tasks to process at once (default: 1000)"),
         )
         parser.add_argument(
             "--dry-run",
             action="store_true",
-            help="Show what would happen without changing anything",
+            help=_("Show what would happen without changing anything"),
         )
 
     def handle(self, *args, **options):

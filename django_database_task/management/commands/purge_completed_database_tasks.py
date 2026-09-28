@@ -3,36 +3,42 @@ from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.tasks.base import TaskResultStatus
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from django_database_task.models import DatabaseTask
 
 
 class Command(BaseCommand):
-    help = "Delete completed task records from the database"
+    @property
+    def help(self):
+        # argparse formats the description and the option help with a regex,
+        # which a lazy string cannot go through, so every string here is
+        # translated when the parser is built rather than at import time.
+        return _("Delete completed task records from the database")
 
     def add_arguments(self, parser):
         parser.add_argument(
             "--days",
             type=int,
             default=0,
-            help="Delete tasks completed more than N days ago (0=all, default: 0)",
+            help=_("Delete tasks completed more than N days ago (0=all, default: 0)"),
         )
         parser.add_argument(
             "--status",
             type=str,
             default="SUCCESSFUL,FAILED",
-            help="Target statuses, comma-separated (default: SUCCESSFUL,FAILED)",
+            help=_("Target statuses, comma-separated (default: SUCCESSFUL,FAILED)"),
         )
         parser.add_argument(
             "--batch-size",
             type=int,
             default=1000,
-            help="Number of tasks to delete at once (default: 1000)",
+            help=_("Number of tasks to delete at once (default: 1000)"),
         )
         parser.add_argument(
             "--dry-run",
             action="store_true",
-            help="Show count only without deleting",
+            help=_("Show count only without deleting"),
         )
 
     def handle(self, *args, **options):
@@ -79,7 +85,7 @@ class Command(BaseCommand):
             if not task_ids:
                 break
 
-            deleted_count, _ = DatabaseTask.objects.filter(id__in=task_ids).delete()
+            deleted_count = DatabaseTask.objects.filter(id__in=task_ids).delete()[0]
             deleted_total += deleted_count
             self.stdout.write(f"Deleted {deleted_total}/{total_count} tasks...")
 

@@ -41,6 +41,143 @@ msgstr "失敗したタスクを再実行"
 msgid "Requeue tasks stuck in running"
 msgstr "実行中のまま残ったタスクをキューに戻す"
 
+#: django_database_task/management/commands/purge_completed_database_tasks.py:17
+msgid "Delete completed task records from the database"
+msgstr "完了したタスクのレコードをデータベースから削除"
+
+#: django_database_task/management/commands/purge_completed_database_tasks.py:24
+msgid "Delete tasks completed more than N days ago (0=all, default: 0)"
+msgstr "N日以上前に完了したタスクを削除 (0=すべて、デフォルト: 0)"
+
+#: django_database_task/management/commands/purge_completed_database_tasks.py:30
+msgid "Target statuses, comma-separated (default: SUCCESSFUL,FAILED)"
+msgstr "対象のステータス、カンマ区切り (デフォルト: SUCCESSFUL,FAILED)"
+
+#: django_database_task/management/commands/purge_completed_database_tasks.py:36
+msgid "Number of tasks to delete at once (default: 1000)"
+msgstr "一度に削除するタスク数 (デフォルト: 1000)"
+
+#: django_database_task/management/commands/purge_completed_database_tasks.py:41
+msgid "Show count only without deleting"
+msgstr "削除せずに件数のみ表示"
+
+#: django_database_task/management/commands/requeue_stale_database_tasks.py:54
+msgid ""
+"Recover tasks left in RUNNING status by a worker that was killed before it "
+"could write a result"
+msgstr "結果を書き込む前に強制終了されたワーカーによってRUNNINGのまま残ったタスクを回復"
+
+#: django_database_task/management/commands/requeue_stale_database_tasks.py:64
+msgid ""
+"Only touch tasks that have been RUNNING for longer than this, as a number "
+"and a unit: 90s, 15m, 2h, 1d. Required, and it must be longer than your "
+"longest running task - a task still running when its threshold passes is "
+"requeued and ends up running twice"
+msgstr "これより長くRUNNINGのままのタスクのみを対象にする。数値と単位で指定する: 90s、15m、2h、1d。必須で、最も長く実行されるタスクより長くすること。この時間を過ぎてもまだ実行中のタスクはキューに戻され、二重に実行される"
+
+#: django_database_task/management/commands/requeue_stale_database_tasks.py:75
+msgid "Queue name to recover (all queues if not specified)"
+msgstr "回復するキュー名 (指定しない場合はすべてのキュー)"
+
+#: django_database_task/management/commands/requeue_stale_database_tasks.py:81
+msgid "Backend name to recover (all backends if not specified)"
+msgstr "回復するバックエンド名 (指定しない場合はすべてのバックエンド)"
+
+#: django_database_task/management/commands/requeue_stale_database_tasks.py:88
+#, python-format
+msgid ""
+"Mark a task FAILED instead of requeueing it once it has been handed to this "
+"many workers (0=no limit, default: %(max_attempts)s). Stops a task that "
+"kills its worker from being requeued forever"
+msgstr "この数のワーカーに渡されたタスクは、キューに戻さずFAILEDにする (0=無制限、デフォルト: %(max_attempts)s)。ワーカーを強制終了させるタスクが際限なくキューに戻されるのを防ぐ"
+
+#: django_database_task/management/commands/requeue_stale_database_tasks.py:99
+msgid ""
+"Mark every stale task FAILED instead of requeueing it. For tasks that are "
+"not safe to run twice"
+msgstr "残ったタスクをすべて、キューに戻さずFAILEDにする。二重に実行すると安全でないタスク向け"
+
+#: django_database_task/management/commands/requeue_stale_database_tasks.py:107
+msgid ""
+"Tell the backend's broker about each requeued task. Needed when workers only "
+"receive from a broker, because the message for the killed attempt is already "
+"gone"
+msgstr "キューに戻した各タスクをバックエンドのブローカーに通知する。ワーカーがブローカーからのみ受信する場合に必要 (強制終了された試行のメッセージはすでに消えているため)"
+
+#: django_database_task/management/commands/requeue_stale_database_tasks.py:116
+msgid "Number of tasks to process at once (default: 1000)"
+msgstr "一度に処理するタスク数 (デフォルト: 1000)"
+
+#: django_database_task/management/commands/requeue_stale_database_tasks.py:121
+msgid "Show what would happen without changing anything"
+msgstr "何も変更せずに、何が行われるかを表示"
+
+#: django_database_task/management/commands/run_database_tasks.py:53
+msgid "Execute tasks queued in the database"
+msgstr "データベースのキューに登録されたタスクを実行"
+
+#: django_database_task/management/commands/run_database_tasks.py:60
+msgid "Queue name to process (all queues if not specified)"
+msgstr "処理するキュー名 (指定しない場合はすべてのキュー)"
+
+#: django_database_task/management/commands/run_database_tasks.py:66
+msgid "Backend name (default: default)"
+msgstr "バックエンド名 (デフォルト: default)"
+
+#: django_database_task/management/commands/run_database_tasks.py:71
+msgid "Continuous mode (keep polling even when no tasks)"
+msgstr "継続モード (タスクがなくてもポーリングを続ける)"
+
+#: django_database_task/management/commands/run_database_tasks.py:77
+msgid "Polling interval in seconds for continuous mode (default: 5)"
+msgstr "継続モードのポーリング間隔（秒）(デフォルト: 5)"
+
+#: django_database_task/management/commands/run_database_tasks.py:83
+msgid "Maximum number of tasks to process (0=unlimited, default: 0)"
+msgstr "処理する最大タスク数 (0=無制限、デフォルト: 0)"
+
+#: django_database_task/management/commands/run_database_tasks.py:90
+msgid ""
+"Where to look for tasks: 'db' polls the database, 'broker' receives from the "
+"backend's broker, 'both' does the broker first and falls back to the "
+"database, and 'auto' (default) means 'both' when the backend has a broker to "
+"receive from and 'db' otherwise"
+msgstr "タスクの取得元: 'db' はデータベースをポーリングし、'broker' はバックエンドのブローカーから受信し、'both' はブローカーを先に見てからデータベースにフォールバックする。'auto' (デフォルト) は、受信できるブローカーがバックエンドにあれば 'both'、なければ 'db' になる"
+
+#: django_database_task/management/commands/run_database_tasks.py:102
+msgid ""
+"Seconds to wait for a broker message before looking again. Replaces --"
+"interval as the idle wait when receiving from a broker (default: 20)"
+msgstr "再確認するまでブローカーのメッセージを待つ秒数。ブローカーから受信する場合、アイドル時の待機として --interval の代わりに使われる (デフォルト: 20)"
+
+#: django_database_task/management/commands/run_database_tasks.py:112
+msgid "Maximum number of broker messages to receive at a time (default: 1)"
+msgstr "一度に受信するブローカーメッセージの最大数 (デフォルト: 1)"
+
+#: django_database_task/management/commands/run_database_tasks.py:120
+msgid ""
+"Maximum seconds to wait for the running task after receiving SIGTERM/SIGINT "
+"before forcing exit (0=wait indefinitely, default: 0)"
+msgstr "SIGTERM/SIGINTを受信してから強制終了するまで、実行中のタスクを待つ最大秒数 (0=無期限に待つ、デフォルト: 0)"
+
+#: django_database_task/management/commands/run_database_tasks.py:129
+msgid ""
+"Do not install SIGTERM/SIGINT handlers; the process is terminated "
+"immediately, even while a task is running"
+msgstr "SIGTERM/SIGINTハンドラーを設定しない。タスクの実行中でもプロセスは即座に終了する"
+
+#: django_database_task/management/commands/run_database_tasks.py:139
+msgid ""
+"Exit with this code when no task was processed, so a job scheduler can tell "
+"an idle run from a real one (0=exit normally, default: 0)"
+msgstr "タスクを1件も処理しなかった場合にこの終了コードで終了する。ジョブスケジューラーが空振りの実行を区別できるようにする (0=通常どおり終了、デフォルト: 0)"
+
+#: django_database_task/management/commands/run_database_tasks.py:150
+msgid ""
+"Exit with this code when at least one task failed or could not be run. Takes "
+"precedence over --empty-exit-code (0=exit normally, default: 0)"
+msgstr "1件以上のタスクが失敗した、または実行できなかった場合にこの終了コードで終了する。--empty-exit-codeより優先される (0=通常どおり終了、デフォルト: 0)"
+
 #: django_database_task/models.py:14
 msgid "task path"
 msgstr "タスクパス"
