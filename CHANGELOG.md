@@ -34,6 +34,16 @@
   `task_started` and `task_finished` signals are not sent for such a task,
   since there is no task object to send them with. Existing projects need
   no changes.
+- An invalid `--empty-exit-code` or `--failed-exit-code` given to
+  `run_database_tasks` on the command line (`abc`, `4.5`, `-1`, `300`)
+  printed a `CommandError` traceback and exited 1. The option parser raised
+  `CommandError`, which argparse does not turn into a usage error, and
+  `run_from_argv()` parses the arguments outside the block that catches it.
+  It now raises `argparse.ArgumentTypeError`, so the command prints its
+  usage and a one-line error and exits 2, like any other invalid option.
+  `call_command()` still raises `CommandError`. Valid values and the
+  defaults are unchanged; existing projects need no changes.
+  ([#22](https://github.com/tokibito/django-database-task/issues/22))
 
 ### Documentation
 
