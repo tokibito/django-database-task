@@ -12,10 +12,11 @@ import pytest
 from django.core.management import ManagementUtility, call_command
 from django.core.management.base import CommandError
 from django.tasks.base import TaskResultStatus
-from django.utils import timezone
+from django.utils import timezone, translation
 
 from django_database_task.backends import DatabaseTaskBackend
 from django_database_task.brokers import BrokerMessage, HTTPPushBroker, PullBroker
+from django_database_task.executor import DEFAULT_MAX_ATTEMPTS
 from django_database_task.models import DatabaseTask
 
 from . import tasks as test_tasks
@@ -1029,3 +1030,56 @@ class TestBrokerExitCodes:
             )
 
         assert exc_info.value.code == 4
+
+
+class TestCommandHelp:
+    """Tests for the --help output of the management commands."""
+
+    COMMANDS = {
+        "run_database_tasks": (
+            "Execute tasks queued in the database",
+            "データベースのキューに登録されたタスクを実行",
+        ),
+        "purge_completed_database_tasks": (
+            "Delete completed task records from the database",
+            "完了したタスクのレコードをデータベースから削除",
+        ),
+        "requeue_stale_database_tasks": (
+            "Recover tasks left in RUNNING status by a worker that was killed "
+            "before it could write a result",
+            "結果を書き込む前に強制終了されたワーカーによってRUNNINGのまま残った"
+            "タスクを回復",
+        ),
+    }
+
+    def format_help(self, name):
+        from django.core.management import load_command_class
+
+        command = load_command_class("django_database_task", name)
+        return command.create_parser("manage.py", name).format_help()
+
+    @pytest.mark.parametrize("name", COMMANDS)
+    def test_help_shows_the_description(self, name):
+        """--help prints the usage text with the command's description."""
+        help_text = self.format_help(name)
+
+        assert self.COMMANDS[name][0] in " ".join(help_text.split())
+
+    @pytest.mark.parametrize("name", COMMANDS)
+    def test_help_is_translated(self, name):
+        """--help follows the active language (#28)."""
+        with translation.override("ja"):
+            help_text = self.format_help(name)
+
+        assert self.COMMANDS[name][1] in "".join(help_text.split())
+
+    def test_option_help_is_translated(self):
+        with translation.override("ja"):
+            help_text = self.format_help("run_database_tasks")
+
+        assert "バックエンド名 (デフォルト: default)" in help_text
+
+    def test_max_attempts_help_shows_the_default(self):
+        help_text = " ".join(self.format_help("requeue_stale_database_tasks").split())
+
+        assert f"default: {DEFAULT_MAX_ATTEMPTS})" in help_text

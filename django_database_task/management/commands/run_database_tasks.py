@@ -8,6 +8,7 @@ from contextlib import ExitStack
 from django.core.management.base import BaseCommand, CommandError
 from django.tasks import task_backends
 from django.tasks.base import TaskResultStatus
+from django.utils.translation import gettext as _
 
 from django_database_task.backends import task_log_fields
 from django_database_task.brokers import PullBroker
@@ -44,43 +45,48 @@ def _exit_code_argument(value):
 
 
 class Command(BaseCommand):
-    help = "Execute tasks queued in the database"
+    @property
+    def help(self):
+        # argparse formats the description and the option help with a regex,
+        # which a lazy string cannot go through, so every string here is
+        # translated when the parser is built rather than at import time.
+        return _("Execute tasks queued in the database")
 
     def add_arguments(self, parser):
         parser.add_argument(
             "--queue",
             type=str,
             default=None,
-            help="Queue name to process (all queues if not specified)",
+            help=_("Queue name to process (all queues if not specified)"),
         )
         parser.add_argument(
             "--backend",
             type=str,
             default="default",
-            help="Backend name (default: default)",
+            help=_("Backend name (default: default)"),
         )
         parser.add_argument(
             "--continuous",
             action="store_true",
-            help="Continuous mode (keep polling even when no tasks)",
+            help=_("Continuous mode (keep polling even when no tasks)"),
         )
         parser.add_argument(
             "--interval",
             type=float,
             default=5.0,
-            help="Polling interval in seconds for continuous mode (default: 5)",
+            help=_("Polling interval in seconds for continuous mode (default: 5)"),
         )
         parser.add_argument(
             "--max-tasks",
             type=int,
             default=0,
-            help="Maximum number of tasks to process (0=unlimited, default: 0)",
+            help=_("Maximum number of tasks to process (0=unlimited, default: 0)"),
         )
         parser.add_argument(
             "--source",
             choices=SOURCES,
             default=SOURCE_AUTO,
-            help=(
+            help=_(
                 "Where to look for tasks: 'db' polls the database, 'broker' "
                 "receives from the backend's broker, 'both' does the broker "
                 "first and falls back to the database, and 'auto' (default) "
@@ -92,7 +98,7 @@ class Command(BaseCommand):
             "--wait-time",
             type=float,
             default=20.0,
-            help=(
+            help=_(
                 "Seconds to wait for a broker message before looking again. "
                 "Replaces --interval as the idle wait when receiving from a "
                 "broker (default: 20)"
@@ -102,7 +108,7 @@ class Command(BaseCommand):
             "--max-messages",
             type=int,
             default=1,
-            help=(
+            help=_(
                 "Maximum number of broker messages to receive at a time (default: 1)"
             ),
         )
@@ -110,7 +116,7 @@ class Command(BaseCommand):
             "--shutdown-timeout",
             type=float,
             default=0.0,
-            help=(
+            help=_(
                 "Maximum seconds to wait for the running task after receiving "
                 "SIGTERM/SIGINT before forcing exit "
                 "(0=wait indefinitely, default: 0)"
@@ -119,7 +125,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--no-graceful-shutdown",
             action="store_true",
-            help=(
+            help=_(
                 "Do not install SIGTERM/SIGINT handlers; the process is "
                 "terminated immediately, even while a task is running"
             ),
@@ -129,7 +135,7 @@ class Command(BaseCommand):
             type=_exit_code_argument,
             default=0,
             metavar="CODE",
-            help=(
+            help=_(
                 "Exit with this code when no task was processed, so a job "
                 "scheduler can tell an idle run from a real one "
                 "(0=exit normally, default: 0)"
@@ -140,7 +146,7 @@ class Command(BaseCommand):
             type=_exit_code_argument,
             default=0,
             metavar="CODE",
-            help=(
+            help=_(
                 "Exit with this code when at least one task failed or could "
                 "not be run. Takes precedence over --empty-exit-code "
                 "(0=exit normally, default: 0)"
