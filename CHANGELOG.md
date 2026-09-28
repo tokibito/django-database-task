@@ -44,6 +44,18 @@
   `call_command()` still raises `CommandError`. Valid values and the
   defaults are unchanged; existing projects need no changes.
   ([#22](https://github.com/tokibito/django-database-task/issues/22))
+- Two records `run_database_tasks` writes on the broker path carried fewer
+  fields than the README's *Structured logging* section promises, so they
+  could not be filtered like the others. `Worker could not run task from
+  broker` carried only `worker_id` and `task_id`; it now carries the full
+  task set (`task_path`, `queue_name`, `priority` and `backend_alias` as
+  well), read from the task's row, and keeps the two it had when the row
+  cannot be read either. `Error receiving from broker` now carries
+  `backend_alias` alongside `worker_id`, `queue_name` and `broker`. Both are
+  listed in the README's record table. No field was renamed or removed and
+  the messages are unchanged, so existing log filters keep matching;
+  existing projects need no changes.
+  ([#32](https://github.com/tokibito/django-database-task/issues/32))
 
 ### Documentation
 

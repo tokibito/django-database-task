@@ -350,7 +350,13 @@ class Command(BaseCommand):
                 # sources turn out to be idle.
                 wait = wait_time if source == SOURCE_BROKER else 0
                 count = self._receive_and_run(
-                    broker, queue_name, worker_id, wait, remaining(), verbosity
+                    broker,
+                    backend_name,
+                    queue_name,
+                    worker_id,
+                    wait,
+                    remaining(),
+                    verbosity,
                 )
                 tasks_processed += count
                 worked = count > 0
@@ -388,7 +394,13 @@ class Command(BaseCommand):
                 # The broker's own wait doubles as the idle interval, so a
                 # message wakes the worker up straight away.
                 tasks_processed += self._receive_and_run(
-                    broker, queue_name, worker_id, wait_time, remaining(), verbosity
+                    broker,
+                    backend_name,
+                    queue_name,
+                    worker_id,
+                    wait_time,
+                    remaining(),
+                    verbosity,
                 )
                 if self._reached_max_tasks(tasks_processed, max_tasks, verbosity):
                     break
@@ -444,7 +456,14 @@ class Command(BaseCommand):
         return True
 
     def _receive_and_run(
-        self, broker, queue_name, worker_id, wait_seconds, max_messages, verbosity
+        self,
+        broker,
+        backend_name,
+        queue_name,
+        worker_id,
+        wait_seconds,
+        max_messages,
+        verbosity,
     ):
         """Receive messages from the broker and run the tasks they name."""
         if max_messages < 1:
@@ -462,6 +481,7 @@ class Command(BaseCommand):
                 type(broker).__name__,
                 extra={
                     "worker_id": worker_id,
+                    "backend_alias": backend_name,
                     "queue_name": queue_name,
                     "broker": type(broker).__name__,
                 },
@@ -501,7 +521,7 @@ class Command(BaseCommand):
             logger.exception(
                 "Worker could not run task from broker: id=%s",
                 message.task_id,
-                extra={"worker_id": worker_id, "task_id": str(message.task_id)},
+                extra=self._broker_task_log_fields(message, worker_id),
             )
             self.stdout.write(self.style.ERROR(f"  Error running task: {e}"))
             self.tasks_failed += 1
@@ -519,6 +539,23 @@ class Command(BaseCommand):
             self.tasks_failed += 1
         self._report_result(result.status, verbosity)
         return True
+
+    def _broker_task_log_fields(self, message, worker_id):
+        """
+        Build the log fields for the task a broker message names.
+
+        run_task_by_id() raised before handing the row back, so it is read
+        again here. When that read fails as well -- the database is often
+        what went wrong -- the record keeps the id the message carried
+        rather than losing the original error to a second one.
+        """
+        try:
+            db_task = DatabaseTask.objects.filter(id=message.task_id).first()
+        except Exception:
+            db_task = None
+        if db_task is None:
+            return {"worker_id": worker_id, "task_id": str(message.task_id)}
+        return task_log_fields(db_task, worker_id)
 
     def _report_result(self, status, verbosity):
         if status == TaskResultStatus.SUCCESSFUL:

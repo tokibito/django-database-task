@@ -820,19 +820,22 @@ Every task record carries:
 | `worker_id` | `hostname-xxxxxxxx` of the worker that ran it |
 
 Completed runs add `status` (`SUCCESSFUL` or `FAILED`) and `duration_ms`, and
-failures add `error_class`. The worker's own start and finish records carry
-`worker_id`, `backend_alias`, `queue_name`, and — on finish —
-`tasks_processed`, `tasks_failed`, and `exit_code`, which is the same code the
-process exits with.
+failures add `error_class`. The worker's own start and finish records, and the
+record for a receive from the broker that failed, carry `worker_id`,
+`backend_alias`, `queue_name`, and — on finish — `tasks_processed`,
+`tasks_failed`, and `exit_code`, which is the same code the process exits with.
+The failed receive also carries `broker`, the class name of the broker.
 
 | Message | Level | When |
 |---------|-------|------|
 | `Worker started` | INFO | The command has resolved its backend and source |
+| `Error receiving from broker` | ERROR | The receive from the broker raised; no task was taken |
 | `Task started` | INFO | Immediately before the task function is called |
 | `Task completed successfully` | INFO | The task returned |
 | `Task failed` | ERROR | The task raised |
 | `Task could not be started` | ERROR | The task function could not be imported; the task is `FAILED` without running |
 | `Worker could not run task` | ERROR | The worker never got the task running |
+| `Worker could not run task from broker` | ERROR | The same, for a task a broker message named; the message is returned to the broker |
 | `Worker finished` | INFO | The loop has ended, with the counts and exit code |
 
 A task whose function no longer imports — the module was renamed, the function
