@@ -1,3 +1,4 @@
+import argparse
 import logging
 import socket
 import sys
@@ -29,9 +30,16 @@ def _exit_code_argument(value):
     try:
         code = int(value)
     except ValueError:
-        raise CommandError(f"Exit codes must be whole numbers, not {value!r}") from None
+        # ArgumentTypeError is what argparse turns into a parser error
+        # (exit code 2); a CommandError would escape run_from_argv()
+        # uncaught as a traceback.
+        raise argparse.ArgumentTypeError(
+            f"Exit codes must be whole numbers, not {value!r}"
+        ) from None
     if not 0 <= code <= 255:
-        raise CommandError(f"Exit codes must be between 0 and 255, not {code}")
+        raise argparse.ArgumentTypeError(
+            f"Exit codes must be between 0 and 255, not {code}"
+        )
     return code
 
 

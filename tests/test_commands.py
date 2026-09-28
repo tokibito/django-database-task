@@ -9,7 +9,7 @@ from io import StringIO
 from unittest.mock import patch
 
 import pytest
-from django.core.management import call_command
+from django.core.management import ManagementUtility, call_command
 from django.core.management.base import CommandError
 from django.tasks.base import TaskResultStatus
 from django.utils import timezone
@@ -938,6 +938,19 @@ class TestExitCodes:
     def test_exit_code_must_fit_in_a_wait_status(self):
         with pytest.raises(CommandError, match="between 0 and 255"):
             call_command("run_database_tasks", "--failed-exit-code=300")
+
+    @pytest.mark.parametrize("value", ["abc", "4.5", "-1", "300"])
+    def test_invalid_exit_code_is_a_usage_error(self, value, capsys):
+        """From the command line it is reported by argparse, not a traceback."""
+        with pytest.raises(SystemExit) as exc_info:
+            ManagementUtility(
+                ["manage.py", "run_database_tasks", f"--empty-exit-code={value}"]
+            ).execute()
+
+        assert exc_info.value.code == 2
+        err = capsys.readouterr().err
+        assert "usage:" in err
+        assert "error: argument --empty-exit-code: Exit codes must be" in err
 
 
 @pytest.mark.django_db
