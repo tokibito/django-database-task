@@ -14,9 +14,11 @@ from django.core.management import call_command
 from django.tasks.base import TaskResultStatus
 
 from django_database_task.backends import DatabaseTaskBackend, task_log_fields
+from django_database_task.brokers import BrokerMessage
 from django_database_task.models import DatabaseTask
 
 from .tasks import failing_task, simple_task
+from .test_commands import FakePullBroker, make_backend, run_worker
 
 LOGGER_NAME = "django_database_task"
 
@@ -149,6 +151,48 @@ class TestTaskLifecycleLogging:
         assert record.task_id == str(result.id)
         assert record.exc_info is not None
 
+    def test_a_task_the_worker_could_not_run_from_the_broker_is_logged(self, task_logs):
+        """The record names the task in full, as the database path does."""
+        result = simple_task.enqueue(1, 2)
+        broker = FakePullBroker(batches=[[BrokerMessage(str(result.id))]])
+
+        with patch.object(
+            DatabaseTaskBackend,
+            "_claim_task",
+            side_effect=RuntimeError("database is down"),
+        ):
+            run_worker(make_backend(broker), source="broker")
+
+        (started,) = records_matching(task_logs, "Worker started")
+        (record,) = records_matching(task_logs, "Worker could not run task from")
+        db_task = DatabaseTask.objects.get(id=result.id)
+        assert record.levelno == logging.ERROR
+        assert record.exc_info is not None
+        assert record.task_id == str(result.id)
+        assert record.task_path == db_task.task_path
+        assert record.queue_name == db_task.queue_name
+        assert record.priority == db_task.priority
+        assert record.backend_alias == started.backend_alias
+        assert record.worker_id == started.worker_id
+
+    def test_a_broker_message_whose_task_cannot_be_read_is_still_logged(
+        self, task_logs
+    ):
+        """
+        A message naming something that is not a task id fails the lookup
+        as well; the record keeps the id it was given.
+        """
+        broker = FakePullBroker(batches=[[BrokerMessage("not-a-uuid")]])
+
+        run_worker(make_backend(broker), source="broker")
+
+        (started,) = records_matching(task_logs, "Worker started")
+        (record,) = records_matching(task_logs, "Worker could not run task from")
+        assert record.levelno == logging.ERROR
+        assert record.task_id == "not-a-uuid"
+        assert record.worker_id == started.worker_id
+        assert broker.nacked == ["not-a-uuid"]
+
     def test_a_task_that_could_not_be_started_is_logged(self, task_logs):
         """The task function no longer imports; the task is FAILED unrun."""
         result = simple_task.enqueue(1, 2)
@@ -180,6 +224,22 @@ class TestWorkerLifecycleLogging:
         assert record.source == "db"
         assert record.queue_name == "emails"
         assert record.continuous is False
+
+    def test_a_failed_receive_is_logged_with_the_worker_fields(self, task_logs):
+        class BrokenBroker(FakePullBroker):
+            def receive(self, queue_name=None, max_messages=1, wait_seconds=20):
+                raise RuntimeError("broker is down")
+
+        run_worker(make_backend(BrokenBroker()), source="broker", queue="emails")
+
+        (started,) = records_matching(task_logs, "Worker started")
+        (record,) = records_matching(task_logs, "Error receiving from broker")
+        assert record.levelno == logging.ERROR
+        assert record.exc_info is not None
+        assert record.worker_id == started.worker_id
+        assert record.backend_alias == "default"
+        assert record.queue_name == "emails"
+        assert record.broker == "BrokenBroker"
 
     def test_finish_reports_the_counts_and_exit_code(self, task_logs):
         simple_task.enqueue(1, 2)
