@@ -57,6 +57,19 @@
   backend, each listing the distinct values of the stored tasks. Existing
   projects need no changes.
   ([#29](https://github.com/tokibito/django-database-task/issues/29))
+- **Purging from your own code.** `purge_completed_tasks()` deletes completed
+  tasks as `purge_completed_database_tasks` does, for a project that purges
+  from a periodic task or other code of its own instead of through the
+  command or `/tasks/purge/`. It takes `backend_name`, `days`, `statuses`,
+  `batch_size`, `dry_run` and `task_path`, and returns the number of tasks
+  deleted. Its defaults are those of `purge_completed_tasks()` in
+  django-tasks-redis rather than the command's: it purges the `default`
+  backend's tasks only (`backend_name=None` for every backend) and keeps the
+  last 7 days. It raises `ValueError` for a negative `days`, which would
+  otherwise match every completed task, and for a status other than
+  `SUCCESSFUL` and `FAILED`. The command and the endpoint are unchanged,
+  including their default of `days=0`. Existing projects need no changes.
+  ([#46](https://github.com/tokibito/django-database-task/issues/46))
 
 ### Changed
 

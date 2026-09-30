@@ -535,6 +535,70 @@ def _notify_broker_of_requeue(task_id):
         logger.exception("Could not notify the broker of requeued task %s", task_id)
 
 
+def purge_completed_tasks(
+    backend_name="default",
+    days=7,
+    statuses=None,
+    batch_size=1000,
+    dry_run=False,
+    task_path=None,
+):
+    """
+    Delete completed tasks older than specified days.
+
+    This is what ``purge_completed_database_tasks`` does, for a project that
+    purges from its own code, a periodic task for example. Unlike the
+    command, it purges one backend's tasks by default and keeps the last
+    week of them.
+
+    Args:
+        backend_name: Backend name (default: "default"). None purges the
+            tasks of every backend, as the command does.
+        days: Delete tasks finished more than this many days ago
+            (0 = every completed task).
+        statuses: List of statuses to delete. Default: [SUCCESSFUL, FAILED].
+        batch_size: Number of tasks to delete at a time.
+        dry_run: Count the matching tasks without deleting anything.
+        task_path: Optional task path filter. Only purge tasks with this
+            task_path.
+
+    Returns:
+        Number of tasks deleted, or that would be deleted for a dry run.
+
+    Raises:
+        ValueError: If days is negative, batch_size is less than 1, or
+            statuses includes a status other than SUCCESSFUL and FAILED.
+
+    Example:
+        >>> from django_database_task import purge_completed_tasks
+        >>> purge_completed_tasks(days=30)
+        150
+    """
+    if days < 0:
+        # A negative age puts the cutoff in the future, which matches every
+        # completed task: a typo would wipe the whole history.
+        raise ValueError(f"days must not be negative, got {days}")
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be at least 1, got {batch_size}")
+
+    if statuses is None:
+        statuses = list(_PURGEABLE_STATUSES)
+    for status in statuses:
+        if status not in _PURGEABLE_STATUSES:
+            # A task that is READY or RUNNING has not completed; deleting it
+            # would lose work that has yet to run or is running now.
+            raise ValueError(f"Only completed tasks can be purged, got {status}")
+
+    queryset, _cutoff_date = _completed_tasks(
+        statuses, days, task_path, backend_name=backend_name
+    )
+
+    if dry_run:
+        return queryset.count()
+
+    return sum(_delete_in_batches(queryset, batch_size))
+
+
 #: The statuses the purge command and endpoint accept.
 _PURGEABLE_STATUSES = (TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED)
 
@@ -551,17 +615,20 @@ def _parse_purge_statuses(status_str):
     return [s for s in statuses if s in valid_values]
 
 
-def _completed_tasks(statuses, days=0, task_path=None):
+def _completed_tasks(statuses, days=0, task_path=None, backend_name=None):
     """
     Build the queryset of the completed tasks a purge deletes.
 
     Returns the queryset and the cutoff date, which is None when ``days`` is
-    not greater than zero and every task in ``statuses`` matches.
+    not greater than zero and every task in ``statuses`` matches. Every
+    backend's tasks match unless ``backend_name`` is given.
     """
     queryset = DatabaseTask.objects.filter(status__in=statuses)
 
     if task_path:
         queryset = queryset.filter(task_path=task_path)
+    if backend_name:
+        queryset = queryset.filter(backend_name=backend_name)
 
     cutoff_date = None
     if days > 0:

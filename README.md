@@ -331,6 +331,12 @@ python manage.py purge_completed_database_tasks [options]
 | `--batch-size` | Number of tasks to delete at once (default: 1000) |
 | `--dry-run` | Show count only without deleting |
 
+The same purge is available as `purge_completed_tasks()` (see
+[Programmatic API](#programmatic-api)), for a project that purges from its own
+code. Its defaults differ from the command's: it purges the `default`
+backend's tasks only and keeps the last 7 days, and it raises `ValueError` for
+a negative `days`.
+
 ### requeue_stale_database_tasks
 
 Recover tasks left in `RUNNING` status by a worker that was killed before it
@@ -1134,6 +1140,7 @@ from django_database_task import (
     get_pending_task_count,
     get_queue_stats,
     get_task_counts,
+    purge_completed_tasks,
     requeue_stale_tasks,
     run_task_by_id,
 )
@@ -1173,6 +1180,10 @@ from django_database_task import requeue_stale_tasks
 summary = requeue_stale_tasks(timedelta(hours=1))
 print(summary)  # {'found': 2, 'requeued': 2, 'failed': 0}
 
+# Delete the default backend's tasks that completed more than 30 days ago
+deleted = purge_completed_tasks(days=30)
+print(f"Deleted {deleted} tasks")
+
 # Stop starting new tasks when the process receives SIGTERM/SIGINT
 from django_database_task import GracefulShutdown
 
@@ -1182,6 +1193,21 @@ with GracefulShutdown() as shutdown:
 
 See [Graceful Shutdown](#graceful-shutdown) for details on `stop_event` and
 `GracefulShutdown`.
+
+`purge_completed_tasks()` takes the options of
+`purge_completed_database_tasks`, with its own defaults:
+
+| Argument | Description |
+|----------|-------------|
+| `backend_name` | Backend whose tasks are deleted (default: `"default"`; `None` for every backend, as the command does) |
+| `days` | Delete tasks completed more than N days ago (default: 7; 0=all). A negative value raises `ValueError` |
+| `statuses` | Statuses to delete (default: `[SUCCESSFUL, FAILED]`). Any other status raises `ValueError` |
+| `batch_size` | Number of tasks to delete at once (default: 1000) |
+| `dry_run` | Return the count without deleting |
+| `task_path` | Only delete tasks with this task path, matched exactly (default: all tasks) |
+
+It returns the number of tasks deleted, or that would be deleted for a dry
+run.
 
 ## HTTP Endpoints (Optional)
 
