@@ -2,9 +2,10 @@
 Graceful shutdown support for task runners.
 
 When a worker process receives a termination signal (typically ``SIGTERM``
-sent by a container orchestrator during a deployment), it should stop
-picking up new tasks but let the task it is currently running finish,
-instead of being killed in the middle of the work.
+sent by a container orchestrator during a deployment, or Ctrl-C / Ctrl-Break
+from a Windows service manager), it should stop picking up new tasks but let
+the task it is currently running finish, instead of being killed in the
+middle of the work.
 
 Example usage:
     from django_database_task import GracefulShutdown, is_shutdown_requested
@@ -42,7 +43,18 @@ logger = logging.getLogger("django_database_task")
 #: Signals handled by default. ``SIGTERM`` is what container orchestrators
 #: (Kubernetes, Cloud Run, systemd, Docker) send before killing a process,
 #: ``SIGINT`` is Ctrl-C during development.
-DEFAULT_SHUTDOWN_SIGNALS = (signal.SIGINT, signal.SIGTERM)
+#:
+#: On Windows nothing delivers ``SIGTERM``: ``taskkill /F``, ``Stop-Process``
+#: and Task Scheduler's "End task" are ``TerminateProcess``, which no handler
+#: sees. What does reach a Python process there is Ctrl-C (``SIGINT``, sent
+#: by NSSM and WinSW when the service is stopped) and Ctrl-Break
+#: (``SIGBREAK``, what a supervisor sends to a process group it created), so
+#: ``SIGBREAK`` is handled as well. ``SIGTERM`` stays in the tuple: installing
+#: its handler is harmless, and ``os.kill()`` can still raise it in-process.
+if sys.platform == "win32":
+    DEFAULT_SHUTDOWN_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGBREAK)
+else:
+    DEFAULT_SHUTDOWN_SIGNALS = (signal.SIGINT, signal.SIGTERM)
 
 #: Exit code used when the graceful shutdown period expires or when a second
 #: signal forces an immediate exit.
@@ -60,7 +72,8 @@ class GracefulShutdown:
     argument of :func:`django_database_task.process_tasks`).
 
     Args:
-        signals: Signals to handle (default: ``SIGINT`` and ``SIGTERM``).
+        signals: Signals to handle (default: ``SIGINT`` and ``SIGTERM``, plus
+            ``SIGBREAK`` on Windows; see :data:`DEFAULT_SHUTDOWN_SIGNALS`).
         timeout: Maximum number of seconds to keep running after a shutdown
             request before forcing the process to exit. ``0`` (default)
             waits indefinitely for the current task to finish.

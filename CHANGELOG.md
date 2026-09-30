@@ -4,6 +4,22 @@
 
 ### Added
 
+- **Windows Server.** `GracefulShutdown` handles `SIGBREAK` on Windows in
+  addition to `SIGINT` and `SIGTERM`, so a worker stopped with Ctrl-Break, or
+  by a service manager sending `CTRL_BREAK_EVENT` to its process group,
+  finishes the running task before exiting instead of being killed mid-task;
+  Ctrl-C, which NSSM and WinSW send on stop, was already handled, and nothing
+  on Windows delivers `SIGTERM`. `DEFAULT_SHUTDOWN_SIGNALS` is unchanged on
+  other platforms, and a `GracefulShutdown` given its own `signals` is
+  unaffected. The README's *Graceful Shutdown* section now says which ways
+  of stopping a process on Windows reach the handler and which are a hard
+  kill, *Deployment examples* gained NSSM and WinSW services with the stop
+  timeout set longer than `--shutdown-timeout`, and *Running from a job
+  scheduler* gained a Task Scheduler shape whose *Do not start a new
+  instance* setting takes the place of `flock`. A new test starts a worker as
+  a child process and stops it the way a supervisor would, on every
+  platform. Existing projects need no changes.
+  ([#31](https://github.com/tokibito/django-database-task/issues/31))
 - **A monitoring API: status counts and queue age.** `get_queue_stats()`
   returns the counts per status (`pending_count`, `running_count`,
   `successful_count`, `failed_count`), the number of delayed tasks not yet

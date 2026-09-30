@@ -64,9 +64,18 @@ them in the summary:
   those: anything other than `CTRL_C_EVENT` / `CTRL_BREAK_EVENT` terminates
   the process, so without the skip the run would look like a hang. Installing
   the handlers is covered by `TestGracefulShutdownHandlers` and
-  `TestRunDatabaseTasksGracefulShutdownOptions`, which run everywhere.
+  `TestRunDatabaseTasksGracefulShutdownOptions`, which run everywhere, and the
+  shutdown path itself by `TestRunDatabaseTasksWorkerProcess`, which starts a
+  worker as a child process and signals it the way a supervisor does:
+  `SIGTERM` on POSIX, `CTRL_BREAK_EVENT` to the child's own process group on
+  Windows. That one needs the test process to have a console, which a
+  terminal and the GitHub Actions runner both provide. The child runs on a
+  SQLite file in a temporary directory, since it cannot see the test
+  process's in-memory database, and does so under
+  `DJANGO_DATABASE_ENGINE=postgresql` as well.
 
-To run those tests too, run the suite under WSL; that is a plain Linux run.
+To run the skipped tests too, run the suite under WSL; that is a plain Linux
+run.
 
 ### Against PostgreSQL
 

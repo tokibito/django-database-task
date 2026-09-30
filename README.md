@@ -360,7 +360,8 @@ Docker, supervisord, ...) sends `SIGTERM` and kills the process with `SIGKILL`
 after a grace period. Without any handling, a task that happens to be running
 at that moment is killed halfway through and stays in `RUNNING` status forever.
 
-`run_database_tasks` installs `SIGTERM` and `SIGINT` handlers by default:
+`run_database_tasks` installs `SIGTERM` and `SIGINT` handlers by default
+(`SIGBREAK` too on Windows, see [On Windows](#on-windows)):
 
 1. On the first signal the worker stops fetching new tasks.
 2. The task currently being executed keeps running until it finishes and its
@@ -404,6 +405,34 @@ and keep the grace period longer than your longest task whenever possible.
 
 Sending the signal a second time (for example pressing Ctrl-C twice) also
 forces an immediate exit.
+
+### On Windows
+
+On Windows the handlers are installed for `SIGINT`, `SIGTERM` and `SIGBREAK`,
+but only two of them are ever delivered:
+
+| What stops the worker | What Python sees | What happens |
+|-----------------------|------------------|--------------|
+| Ctrl-C in the console; NSSM or WinSW stopping the service | `SIGINT` | Graceful shutdown |
+| Ctrl-Break; a supervisor sending `CTRL_BREAK_EVENT` to the worker's process group | `SIGBREAK` | Graceful shutdown |
+| `taskkill /F`, `Stop-Process`, Task Scheduler's *End task* | nothing | Hard kill |
+
+Nothing on Windows sends `SIGTERM`: `taskkill /F`, `Stop-Process` and *End
+task* are all `TerminateProcess`, which no handler sees. `taskkill` without
+`/F` posts `WM_CLOSE` to the process's windows, and a console worker has
+none, so it does nothing either. After a hard kill the running task stays in
+`RUNNING` status until `requeue_stale_database_tasks` puts it back, the same
+route as a crash; see
+[Recovering tasks left in RUNNING status](#recovering-tasks-left-in-running-status).
+
+So on Windows, run the worker under something that sends Ctrl-C or Ctrl-Break
+to stop it, and give it longer than `--shutdown-timeout` before it gives up
+and terminates the process. The [NSSM and WinSW](#deployment-examples) examples
+below do; for a Windows service written in-house, start the worker with
+`CREATE_NEW_PROCESS_GROUP` and stop it with
+`GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid)`. Ctrl-C reaches every
+process on the console, Ctrl-Break only the group it is sent to, which is
+why a supervisor prefers the latter.
 
 ### Cooperating from inside a task
 
@@ -475,6 +504,51 @@ services:
 Make sure the worker is PID 1 or that the signal reaches it (use the exec form
 of `CMD`, or an init such as `tini`, rather than wrapping the command in a
 shell script that swallows signals).
+
+**Windows service with NSSM** - [NSSM](https://nssm.cc/) stops a service by
+sending Ctrl-C, then `WM_CLOSE`, then `WM_QUIT`, then `TerminateProcess`,
+waiting `AppStopMethodConsole` milliseconds after the Ctrl-C. The default is
+1500, so set it longer than `--shutdown-timeout` or the worker is killed
+mid-task anyway:
+
+```bat
+nssm install ddt-worker C:\srv\app\venv\Scripts\python.exe ^
+    manage.py run_database_tasks --continuous --shutdown-timeout=50
+nssm set ddt-worker AppDirectory C:\srv\app
+nssm set ddt-worker AppEnvironmentExtra DJANGO_SETTINGS_MODULE=myproject.settings
+nssm set ddt-worker AppStopMethodConsole 60000
+nssm set ddt-worker AppStdout C:\srv\app\logs\worker.log
+nssm set ddt-worker AppStderr C:\srv\app\logs\worker.log
+nssm start ddt-worker
+```
+
+`nssm stop ddt-worker` and *Stop* in `services.msc` then go through the
+graceful path. NSSM restarts the worker when it exits, so the loop keeps
+running after a forced exit as well.
+
+**Windows service with WinSW** - [WinSW](https://github.com/winsw/winsw)
+sends Ctrl-C on stop and waits `stoptimeout` (15 seconds by default) before
+killing the process:
+
+```xml
+<service>
+  <id>ddt-worker</id>
+  <name>django-database-task worker</name>
+  <executable>C:\srv\app\venv\Scripts\python.exe</executable>
+  <arguments>manage.py run_database_tasks --continuous --shutdown-timeout=50</arguments>
+  <workingdirectory>C:\srv\app</workingdirectory>
+  <env name="DJANGO_SETTINGS_MODULE" value="myproject.settings"/>
+  <stoptimeout>60 sec</stoptimeout>
+  <log mode="roll"></log>
+  <onfailure action="restart" delay="5 sec"/>
+</service>
+```
+
+With either service manager, a system shutdown gives every service
+`WaitToKillServiceTimeout` (20 seconds by default, under
+`HKLM\SYSTEM\CurrentControlSet\Control`) before it is killed, whatever the
+service's own timeout says. Keep `--shutdown-timeout` under that, or raise the
+value, if tasks must survive a reboot without going through recovery.
 
 ### Recovering tasks left in RUNNING status
 
@@ -714,6 +788,11 @@ flock -n --conflict-exit-code 3 "/var/lock/ddt-worker-$QUEUE.lock" \
 The lock is about resource use on one host, not correctness. Workers on other
 hosts hold their own lock files and still cannot collide over a task.
 
+Windows has no `flock(1)`. Task Scheduler's *Do not start a new instance*
+setting plays the same role there, see
+[Windows Task Scheduler](#windows-task-scheduler); nothing is needed from the
+library either way.
+
 ### systemd
 
 Two shapes, depending on whether the worker stays up.
@@ -803,6 +882,42 @@ See [Graceful Shutdown](#graceful-shutdown) for what happens between `SIGTERM`
 and `TimeoutStopSec`, and
 [Recovering tasks left in RUNNING status](#recovering-tasks-left-in-running-status)
 for the cleanup after a worker that did not get that far.
+
+### Windows Task Scheduler
+
+The timer-driven shape on Windows. The worker starts, drains the queue and
+exits; Task Scheduler records the exit code as the task's *Last Run Result*
+and in event 201 of its operational log, which is what a monitoring agent
+reads. `-MultipleInstances IgnoreNew` is the *Do not start a new instance*
+setting, and does what `flock -n` does above:
+
+```powershell
+$action = New-ScheduledTaskAction `
+    -Execute "C:\srv\app\venv\Scripts\python.exe" `
+    -Argument "manage.py run_database_tasks --settings=myproject.settings --empty-exit-code=4 --failed-exit-code=1" `
+    -WorkingDirectory "C:\srv\app"
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+    -RepetitionInterval (New-TimeSpan -Minutes 1)
+$settings = New-ScheduledTaskSettingsSet `
+    -MultipleInstances IgnoreNew `
+    -ExecutionTimeLimit (New-TimeSpan -Hours 1)
+Register-ScheduledTask -TaskName "ddt-worker" `
+    -Action $action -Trigger $trigger -Settings $settings `
+    -User "app" -Password $password
+```
+
+`--settings` stands in for `DJANGO_SETTINGS_MODULE`, since a scheduled task
+cannot set environment variables of its own. The account needs a password so
+the task runs whether or not anyone is logged on. Missed starts are skipped
+unless *Run task as soon as possible after a scheduled start is missed* is
+ticked, so there is no `Persistent=false` to set.
+
+*Stop the task if it runs longer than* (`-ExecutionTimeLimit`) and *End task*
+are hard kills, not a signal, so a run cut short that way leaves its task in
+`RUNNING` status for `requeue_stale_database_tasks` to recover. Set the limit
+well above the longest run, or drop it with
+`-ExecutionTimeLimit (New-TimeSpan -Seconds 0)`. The exit codes and what
+counts as a failure are the same as on Linux; see [Exit codes](#exit-codes).
 
 ### Structured logging
 

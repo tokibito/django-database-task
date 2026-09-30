@@ -47,13 +47,17 @@ def database_from_env():
     PostgreSQL instead, which is the only way to exercise LISTEN/NOTIFY
     and `SELECT FOR UPDATE SKIP LOCKED` against the thing they talk to.
     CI runs the suite both ways.
+
+    DJANGO_SQLITE_NAME puts the SQLite database in a file instead of in
+    memory. The suite sets it for the worker processes it starts, which
+    cannot see the test process's in-memory database.
     """
     engine = os.environ.get("DJANGO_DATABASE_ENGINE", "sqlite3")
 
     if engine in ("sqlite", "sqlite3"):
         return {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": ":memory:",
+            "NAME": os.environ.get("DJANGO_SQLITE_NAME", ":memory:"),
         }
 
     if engine in ("postgres", "postgresql"):
