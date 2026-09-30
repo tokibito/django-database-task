@@ -140,6 +140,7 @@
   reported, which Windows refuses (`WinError 10049`). moto is now bound to
   `127.0.0.1`, which also keeps it off the network. Only the test suite
   changes; the package is unaffected.
+  ([#52](https://github.com/tokibito/django-database-task/pull/52))
 
 ### Documentation
 
