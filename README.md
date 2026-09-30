@@ -2020,10 +2020,12 @@ The admin interface provides the following bulk actions:
 |--------|-------------|
 | **Run selected tasks** | Execute selected tasks that are in READY status |
 | **Retry failed tasks** | Reset FAILED tasks to READY status and re-execute them |
+| **Requeue tasks stuck in running** | Reset RUNNING tasks to READY status, leaving them for the next worker poll |
 
 These actions are useful for:
 - Manually triggering task execution from the admin
 - Retrying failed tasks after fixing issues
+- Recovering tasks whose worker was killed before it could write a result
 - Testing task execution during development
 
 ## Contributing
