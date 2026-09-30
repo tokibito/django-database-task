@@ -20,6 +20,7 @@ Example usage:
 import logging
 import socket
 import uuid
+from datetime import timedelta
 
 from django.db import transaction
 from django.db.models import Q
@@ -532,3 +533,53 @@ def _notify_broker_of_requeue(task_id):
         backend.notify_broker(backend.get_result(str(task_id)))
     except Exception:
         logger.exception("Could not notify the broker of requeued task %s", task_id)
+
+
+#: The statuses the purge command and endpoint accept.
+_PURGEABLE_STATUSES = (TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED)
+
+
+def _parse_purge_statuses(status_str):
+    """
+    Parse a comma-separated list of statuses for a purge.
+
+    Case and surrounding whitespace are ignored, and anything that is not a
+    purgeable status is dropped, so the result may be empty.
+    """
+    statuses = [s.strip().upper() for s in status_str.split(",")]
+    valid_values = [status.value for status in _PURGEABLE_STATUSES]
+    return [s for s in statuses if s in valid_values]
+
+
+def _completed_tasks(statuses, days=0, task_path=None):
+    """
+    Build the queryset of the completed tasks a purge deletes.
+
+    Returns the queryset and the cutoff date, which is None when ``days`` is
+    not greater than zero and every task in ``statuses`` matches.
+    """
+    queryset = DatabaseTask.objects.filter(status__in=statuses)
+
+    if task_path:
+        queryset = queryset.filter(task_path=task_path)
+
+    cutoff_date = None
+    if days > 0:
+        cutoff_date = timezone.now() - timedelta(days=days)
+        queryset = queryset.filter(finished_at__lt=cutoff_date)
+
+    return queryset, cutoff_date
+
+
+def _delete_in_batches(queryset, batch_size):
+    """
+    Delete the tasks in ``queryset``, ``batch_size`` rows at a time.
+
+    Yields the number of tasks deleted by each batch.
+    """
+    while True:
+        task_ids = list(queryset.values_list("id", flat=True)[:batch_size])
+        if not task_ids:
+            break
+
+        yield DatabaseTask.objects.filter(id__in=task_ids).delete()[0]

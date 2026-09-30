@@ -1,11 +1,11 @@
-from datetime import timedelta
-
 from django.core.management.base import BaseCommand
-from django.tasks.base import TaskResultStatus
-from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from django_database_task.models import DatabaseTask
+from django_database_task.executor import (
+    _completed_tasks,
+    _delete_in_batches,
+    _parse_purge_statuses,
+)
 
 
 class Command(BaseCommand):
@@ -53,10 +53,7 @@ class Command(BaseCommand):
         batch_size = options["batch_size"]
         dry_run = options["dry_run"]
 
-        # Parse statuses
-        statuses = [s.strip().upper() for s in status_str.split(",")]
-        valid_statuses = [TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED]
-        statuses = [s for s in statuses if s in [v.value for v in valid_statuses]]
+        statuses = _parse_purge_statuses(status_str)
 
         if not statuses:
             self.stdout.write(self.style.ERROR("No valid statuses specified"))
@@ -65,15 +62,8 @@ class Command(BaseCommand):
         self.stdout.write(f"Target statuses: {', '.join(statuses)}")
         self.stdout.write(f"Task path: {task_path or 'all tasks'}")
 
-        # Build query
-        queryset = DatabaseTask.objects.filter(status__in=statuses)
-
-        if task_path:
-            queryset = queryset.filter(task_path=task_path)
-
-        if days > 0:
-            cutoff_date = timezone.now() - timedelta(days=days)
-            queryset = queryset.filter(finished_at__lt=cutoff_date)
+        queryset, cutoff_date = _completed_tasks(statuses, days, task_path)
+        if cutoff_date is not None:
             self.stdout.write(f"Cutoff date: {cutoff_date}")
 
         total_count = queryset.count()
@@ -87,15 +77,8 @@ class Command(BaseCommand):
             self.stdout.write("No tasks to delete")
             return
 
-        # Batch delete
         deleted_total = 0
-        while True:
-            # Get batch of IDs and delete
-            task_ids = list(queryset.values_list("id", flat=True)[:batch_size])
-            if not task_ids:
-                break
-
-            deleted_count = DatabaseTask.objects.filter(id__in=task_ids).delete()[0]
+        for deleted_count in _delete_in_batches(queryset, batch_size):
             deleted_total += deleted_count
             self.stdout.write(f"Deleted {deleted_total}/{total_count} tasks...")
 
