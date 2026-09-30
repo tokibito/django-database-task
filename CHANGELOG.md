@@ -127,6 +127,14 @@
   English text, the options and their defaults are unchanged, and so is what
   the commands print while they run; existing projects need no changes.
   ([#28](https://github.com/tokibito/django-database-task/issues/28))
+- `test_wait_blocks_until_timeout` could fail on Windows. Windows can measure
+  a `threading.Event.wait()` slightly short of its timeout, so the test's
+  `elapsed >= 0.1` could fail there, as it did in the first Windows CI run of
+  django-tasks-redis. The lower bound is now 0.08, still below one Windows
+  clock tick and still failing on an instant return; what the test checks is
+  that `wait()` blocked, not the exact duration. Only the test suite changes;
+  the package is unaffected.
+  ([#27](https://github.com/tokibito/django-database-task/issues/27))
 
 ### Documentation
 
