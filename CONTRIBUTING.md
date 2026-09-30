@@ -38,9 +38,9 @@ runs them.
 
 [moto]: https://github.com/getmoto/moto
 
-Apart from the PostgreSQL integration tests below, a full run reports **no
-skipped tests**. If you see others, an extra is missing from your environment —
-see above.
+Apart from the PostgreSQL integration tests below, a full run on Linux or
+macOS reports **no skipped tests**. If you see others, an extra is missing from
+your environment — see above.
 
 To run part of the suite:
 
@@ -49,6 +49,23 @@ venv/bin/pytest tests/test_backend.py
 venv/bin/pytest tests/sqs/
 venv/bin/pytest -k "broker and auth"
 ```
+
+### On Windows
+
+The suite is written for Linux, which is what CI runs it on. On Windows one
+group of tests is skipped, and `-rs` lists them in the summary:
+
+- `tests/test_shutdown.py::TestGracefulShutdownSignals`, and in
+  `tests/test_commands.py` `TestRunDatabaseTasksGracefulShutdown`,
+  `TestRunDatabaseTasksIdleHeartbeat` and `TestBrokerContinuousMode`, send the
+  test process a real `SIGTERM` or `SIGINT` with `os.kill()` and expect the
+  `GracefulShutdown` handler to run. On Windows `os.kill()` cannot deliver
+  those: anything other than `CTRL_C_EVENT` / `CTRL_BREAK_EVENT` terminates
+  the process, so without the skip the run would look like a hang. Installing
+  the handlers is covered by `TestGracefulShutdownHandlers` and
+  `TestRunDatabaseTasksGracefulShutdownOptions`, which run everywhere.
+
+To run those tests too, run the suite under WSL; that is a plain Linux run.
 
 ### Against PostgreSQL
 

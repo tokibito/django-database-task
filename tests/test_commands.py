@@ -2,6 +2,7 @@
 
 import os
 import signal
+import sys
 import threading
 import time
 from datetime import timedelta
@@ -29,6 +30,15 @@ from .tasks import (
     shutdown_signal_task,
     simple_task,
     special_queue_task,
+)
+
+# On Windows os.kill() does not deliver SIGTERM or SIGINT to a handler: any
+# signal other than CTRL_C_EVENT / CTRL_BREAK_EVENT terminates the process
+# outright, so a run of these tests there looks like a hang, not a failure.
+# The tasks in tests/tasks.py that signal the process are used here only.
+posix_signals = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="os.kill() cannot deliver a signal to the test process on Windows",
 )
 
 
@@ -135,8 +145,11 @@ class TestRunDatabaseTasks:
         assert "No more tasks to process" in out.getvalue()
 
 
+@posix_signals
 @pytest.mark.django_db
 class TestRunDatabaseTasksGracefulShutdown:
+    """The command's reaction to a signal the process receives."""
+
     def test_running_task_finishes_before_shutdown(self):
         """A task running when SIGTERM arrives is not interrupted."""
         signal_result = shutdown_signal_task.enqueue()
@@ -210,6 +223,21 @@ class TestRunDatabaseTasksGracefulShutdown:
         # Without an interruptible sleep this would block for 60 seconds.
         assert elapsed < 30
 
+    def test_task_can_check_shutdown_state(self):
+        """Task functions can stop early with is_shutdown_requested()."""
+        result = shutdown_aware_task.enqueue(iterations=100)
+
+        call_command("run_database_tasks", stdout=StringIO())
+
+        db_task = DatabaseTask.objects.get(id=result.id)
+        assert db_task.status == TaskResultStatus.SUCCESSFUL
+        assert db_task.return_value_json < 100
+
+
+@pytest.mark.django_db
+class TestRunDatabaseTasksGracefulShutdownOptions:
+    """Handler installation and the startup report, no signal sent."""
+
     def test_signal_handlers_are_restored(self):
         """The original signal handlers are restored after the command."""
         original_term = signal.getsignal(signal.SIGTERM)
@@ -250,19 +278,47 @@ class TestRunDatabaseTasksGracefulShutdown:
 
         assert "Graceful shutdown: enabled (timeout=30.0s)" in out.getvalue()
 
-    def test_task_can_check_shutdown_state(self):
-        """Task functions can stop early with is_shutdown_requested()."""
-        result = shutdown_aware_task.enqueue(iterations=100)
-
-        call_command("run_database_tasks", stdout=StringIO())
-
-        db_task = DatabaseTask.objects.get(id=result.id)
-        assert db_task.status == TaskResultStatus.SUCCESSFUL
-        assert db_task.return_value_json < 100
-
 
 @pytest.mark.django_db
 class TestRunDatabaseTasksVerbosity:
+    def test_verbosity_0_silences_informational_output(self):
+        """-v 0 prints nothing for a successful run."""
+        simple_task.enqueue(5, 3)
+
+        out = StringIO()
+        call_command("run_database_tasks", verbosity=0, stdout=out)
+
+        assert out.getvalue() == ""
+        assert (
+            DatabaseTask.objects.filter(status=TaskResultStatus.SUCCESSFUL).count() == 1
+        )
+
+    def test_verbosity_0_still_reports_failures(self):
+        """Task failures are reported even at verbosity 0."""
+        failing_task.enqueue()
+
+        out = StringIO()
+        call_command("run_database_tasks", verbosity=0, stdout=out)
+
+        assert "Task failed" in out.getvalue()
+
+    def test_default_verbosity_reports_task(self):
+        """The per-task block is still printed at the default verbosity."""
+        simple_task.enqueue(5, 3)
+
+        out = StringIO()
+        call_command("run_database_tasks", stdout=out)
+
+        output = out.getvalue()
+        assert "Processing task:" in output
+        assert "Task completed successfully" in output
+
+
+@posix_signals
+@pytest.mark.django_db
+class TestRunDatabaseTasksIdleHeartbeat:
+    """The heartbeat dots of continuous mode, stopped by a signal."""
+
     def _run_continuous(self, **options):
         """Run one polling round in continuous mode, then stop it."""
         pid = os.getpid()
@@ -299,38 +355,6 @@ class TestRunDatabaseTasksVerbosity:
         output = self._run_continuous(verbosity=2)
 
         assert self._heartbeat_lines(output)
-
-    def test_verbosity_0_silences_informational_output(self):
-        """-v 0 prints nothing for a successful run."""
-        simple_task.enqueue(5, 3)
-
-        out = StringIO()
-        call_command("run_database_tasks", verbosity=0, stdout=out)
-
-        assert out.getvalue() == ""
-        assert (
-            DatabaseTask.objects.filter(status=TaskResultStatus.SUCCESSFUL).count() == 1
-        )
-
-    def test_verbosity_0_still_reports_failures(self):
-        """Task failures are reported even at verbosity 0."""
-        failing_task.enqueue()
-
-        out = StringIO()
-        call_command("run_database_tasks", verbosity=0, stdout=out)
-
-        assert "Task failed" in out.getvalue()
-
-    def test_default_verbosity_reports_task(self):
-        """The per-task block is still printed at the default verbosity."""
-        simple_task.enqueue(5, 3)
-
-        out = StringIO()
-        call_command("run_database_tasks", stdout=out)
-
-        output = out.getvalue()
-        assert "Processing task:" in output
-        assert "Task completed successfully" in output
 
 
 @pytest.mark.django_db
@@ -763,6 +787,7 @@ class TestBothSources:
         )
 
 
+@posix_signals
 @pytest.mark.django_db
 class TestBrokerContinuousMode:
     """Tests for the worker staying up while receiving from a broker."""
