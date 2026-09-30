@@ -409,6 +409,52 @@ class TestPurgeCompletedDatabaseTasks:
 
         assert "No tasks to delete" in out.getvalue()
 
+    def test_purge_respects_task_path_option(self):
+        """task_path option deletes only that task's results."""
+        simple_task.enqueue(1, 1)
+        failing_task.enqueue()
+        call_command("run_database_tasks", stdout=StringIO())
+
+        out = StringIO()
+        call_command(
+            "purge_completed_database_tasks",
+            task_path="tests.tasks.simple_task",
+            stdout=out,
+        )
+
+        assert list(DatabaseTask.objects.values_list("task_path", flat=True)) == [
+            "tests.tasks.failing_task"
+        ]
+        assert "Task path: tests.tasks.simple_task" in out.getvalue()
+        assert "Successfully deleted 1 tasks" in out.getvalue()
+
+    def test_purge_combines_task_path_with_days(self):
+        """task_path and days both have to match."""
+        old = simple_task.enqueue(1, 1)
+        simple_task.enqueue(2, 2)
+        other = failing_task.enqueue()
+        call_command("run_database_tasks", stdout=StringIO())
+        DatabaseTask.objects.filter(id__in=[old.id, other.id]).update(
+            finished_at=timezone.now() - timedelta(days=10)
+        )
+
+        call_command(
+            "purge_completed_database_tasks",
+            "--task-path=tests.tasks.simple_task",
+            "--days=5",
+            stdout=StringIO(),
+        )
+
+        assert DatabaseTask.objects.count() == 2
+        assert not DatabaseTask.objects.filter(id=old.id).exists()
+
+    def test_purge_reports_all_tasks_without_task_path(self):
+        """Without task_path every task path is a target."""
+        out = StringIO()
+        call_command("purge_completed_database_tasks", stdout=out)
+
+        assert "Task path: all tasks" in out.getvalue()
+
 
 @pytest.mark.django_db
 class TestPurgeWithPendingTasks:

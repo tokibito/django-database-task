@@ -856,6 +856,104 @@ class TestPurgeCompletedTasksView:
         assert response.status_code == 400
         assert "No valid statuses" in response.json()["error"]
 
+    def _create_completed_tasks(self, task_paths):
+        for task_path in task_paths:
+            DatabaseTask.objects.create(
+                task_path=task_path,
+                queue_name="default",
+                priority=0,
+                args_json=[],
+                kwargs_json={},
+                status=TaskResultStatus.SUCCESSFUL,
+                enqueued_at=timezone.now(),
+                finished_at=timezone.now(),
+                backend_name="default",
+            )
+
+    def test_purge_filters_by_task_path(self, client):
+        """Only the tasks with the given task path are deleted."""
+        self._create_completed_tasks(
+            ["tests.tasks.simple_task", "tests.tasks.simple_task", "tests.tasks.other"]
+        )
+
+        response = client.post(
+            reverse("django_database_task:purge_completed_tasks"),
+            data=json.dumps({"task_path": "tests.tasks.simple_task"}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        assert response.json()["deleted"] == 2
+        assert list(DatabaseTask.objects.values_list("task_path", flat=True)) == [
+            "tests.tasks.other"
+        ]
+
+    def test_purge_task_path_is_matched_exactly(self, client):
+        """A prefix of a task path does not match it."""
+        self._create_completed_tasks(["tests.tasks.simple_task"])
+
+        response = client.post(
+            reverse("django_database_task:purge_completed_tasks"),
+            data=json.dumps({"task_path": "tests.tasks"}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        assert response.json()["deleted"] == 0
+        assert DatabaseTask.objects.count() == 1
+
+    def test_purge_null_task_path_deletes_every_task(self, client):
+        """A null task_path is the same as leaving it out."""
+        self._create_completed_tasks(["tests.tasks.simple_task", "tests.tasks.other"])
+
+        response = client.post(
+            reverse("django_database_task:purge_completed_tasks"),
+            data=json.dumps({"task_path": None}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 200
+        assert response.json()["deleted"] == 2
+
+    def test_purge_via_get_filters_by_task_path(self, client):
+        """GET takes task_path as a query parameter."""
+        self._create_completed_tasks(["tests.tasks.simple_task", "tests.tasks.other"])
+
+        response = client.get(
+            reverse("django_database_task:purge_completed_tasks"),
+            {"task_path": "tests.tasks.simple_task", "dry_run": "true"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"count": 1, "dry_run": True}
+        assert DatabaseTask.objects.count() == 2
+
+    def test_purge_via_get_empty_task_path_deletes_every_task(self, client):
+        """An empty task_path query parameter does not filter."""
+        self._create_completed_tasks(["tests.tasks.simple_task", "tests.tasks.other"])
+
+        response = client.get(
+            reverse("django_database_task:purge_completed_tasks"),
+            {"task_path": ""},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["deleted"] == 2
+
+    def test_purge_rejects_non_string_task_path(self, client):
+        """A task_path that is not a string returns 400."""
+        self._create_completed_tasks(["tests.tasks.simple_task"])
+
+        response = client.post(
+            reverse("django_database_task:purge_completed_tasks"),
+            data=json.dumps({"task_path": ["tests.tasks.simple_task"]}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 400
+        assert "task_path must be a string" in response.json()["error"]
+        assert DatabaseTask.objects.count() == 1
+
 
 # All endpoints that must consult the backend's authentication handler,
 # as (url name, HTTP method, reverse() args).

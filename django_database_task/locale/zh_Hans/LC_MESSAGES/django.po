@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-database-task 0.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-30 04:39+0000\n"
+"POT-Creation-Date: 2026-09-30 05:44+0000\n"
 "PO-Revision-Date: 2026-09-30 00:00+0000\n"
 "Last-Translator: Shinya Okano <tokibito@gmail.com>\n"
 "Language-Team: Simplified Chinese\n"
@@ -52,11 +52,15 @@ msgstr "删除 N 天以前完成的任务（0=全部，默认：0）"
 msgid "Target statuses, comma-separated (default: SUCCESSFUL,FAILED)"
 msgstr "目标状态，以逗号分隔（默认：SUCCESSFUL,FAILED）"
 
-#: management/commands/purge_completed_database_tasks.py:36
+#: management/commands/purge_completed_database_tasks.py:35
+msgid "Only delete tasks with this task path (default: all tasks)"
+msgstr "仅删除具有此任务路径的任务（默认：所有任务）"
+
+#: management/commands/purge_completed_database_tasks.py:41
 msgid "Number of tasks to delete at once (default: 1000)"
 msgstr "每次删除的任务数（默认：1000）"
 
-#: management/commands/purge_completed_database_tasks.py:41
+#: management/commands/purge_completed_database_tasks.py:46
 msgid "Show count only without deleting"
 msgstr "仅显示数量，不删除"
 

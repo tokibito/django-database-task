@@ -30,6 +30,11 @@ class Command(BaseCommand):
             help=_("Target statuses, comma-separated (default: SUCCESSFUL,FAILED)"),
         )
         parser.add_argument(
+            "--task-path",
+            default=None,
+            help=_("Only delete tasks with this task path (default: all tasks)"),
+        )
+        parser.add_argument(
             "--batch-size",
             type=int,
             default=1000,
@@ -44,6 +49,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         days = options["days"]
         status_str = options["status"]
+        task_path = options["task_path"]
         batch_size = options["batch_size"]
         dry_run = options["dry_run"]
 
@@ -57,9 +63,13 @@ class Command(BaseCommand):
             return
 
         self.stdout.write(f"Target statuses: {', '.join(statuses)}")
+        self.stdout.write(f"Task path: {task_path or 'all tasks'}")
 
         # Build query
         queryset = DatabaseTask.objects.filter(status__in=statuses)
+
+        if task_path:
+            queryset = queryset.filter(task_path=task_path)
 
         if days > 0:
             cutoff_date = timezone.now() - timedelta(days=days)

@@ -456,12 +456,14 @@ class PurgeCompletedTasksView(BackendAuthMixin, View):
     GET query parameters:
         days: Delete tasks completed more than N days ago (0=all, default: 0)
         status: Target statuses, comma-separated (default: "SUCCESSFUL,FAILED")
+        task_path: Only delete tasks with this task path (default: all tasks)
         batch_size: Number of tasks to delete at once (default: 1000, max: 10000)
         dry_run: If "true", return count without deleting (default: "false")
 
     POST parameters (JSON body):
         days: Delete tasks completed more than N days ago (0=all, default: 0)
         status: Target statuses, comma-separated (default: "SUCCESSFUL,FAILED")
+        task_path: Only delete tasks with this task path (default: all tasks)
         batch_size: Number of tasks to delete at once (default: 1000, max: 10000)
         dry_run: If true, return count without deleting (default: false)
 
@@ -490,6 +492,7 @@ class PurgeCompletedTasksView(BackendAuthMixin, View):
     GAE Cron:
         GAE cron only supports GET requests. Use query parameters:
         GET /tasks/purge/?days=7&status=SUCCESSFUL,FAILED
+        GET /tasks/purge/?days=1&task_path=myapp.tasks.heartbeat
     """
 
     auth_endpoint = "purge"
@@ -513,6 +516,7 @@ class PurgeCompletedTasksView(BackendAuthMixin, View):
             return {
                 "days": days,
                 "status": request.GET.get("status", "SUCCESSFUL,FAILED"),
+                "task_path": request.GET.get("task_path"),
                 "batch_size": batch_size,
                 "dry_run": request.GET.get("dry_run", "").lower() == "true",
             }, None
@@ -529,6 +533,7 @@ class PurgeCompletedTasksView(BackendAuthMixin, View):
             return {
                 "days": data.get("days", 0),
                 "status": data.get("status", "SUCCESSFUL,FAILED"),
+                "task_path": data.get("task_path"),
                 "batch_size": data.get("batch_size", 1000),
                 "dry_run": data.get("dry_run", False),
             }, None
@@ -542,6 +547,7 @@ class PurgeCompletedTasksView(BackendAuthMixin, View):
 
         days = params["days"]
         status_str = params["status"]
+        task_path = params["task_path"]
         batch_size = params["batch_size"]
         dry_run = params["dry_run"]
 
@@ -558,6 +564,9 @@ class PurgeCompletedTasksView(BackendAuthMixin, View):
         if batch_size > 10000:
             return JsonResponse({"error": "batch_size cannot exceed 10000"}, status=400)
 
+        if task_path is not None and not isinstance(task_path, str):
+            return JsonResponse({"error": "task_path must be a string"}, status=400)
+
         # Parse statuses
         statuses = [s.strip().upper() for s in status_str.split(",")]
         valid_statuses = [TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED]
@@ -568,6 +577,9 @@ class PurgeCompletedTasksView(BackendAuthMixin, View):
 
         # Build query
         queryset = DatabaseTask.objects.filter(status__in=statuses)
+
+        if task_path:
+            queryset = queryset.filter(task_path=task_path)
 
         if days > 0:
             cutoff_date = timezone.now() - timedelta(days=days)
