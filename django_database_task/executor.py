@@ -217,6 +217,55 @@ def get_pending_task_count(queue_name=None, backend_name="default"):
     return queryset.count()
 
 
+def get_task_counts(backend_name="default", queue_name=None):
+    """
+    Get task counts by status.
+
+    Args:
+        backend_name: Backend name (default: "default").
+        queue_name: Optional queue name to filter tasks.
+
+    Returns:
+        Dict mapping each status to the number of tasks in it. READY includes
+        the delayed tasks whose ``run_after`` has not come.
+
+    Example:
+        >>> from django_database_task import get_task_counts
+        >>> get_task_counts()
+        {'READY': 3, 'RUNNING': 1, 'FAILED': 0, 'SUCCESSFUL': 42}
+    """
+    backend = task_backends[backend_name]
+    return backend.get_status_counts(queue_name=queue_name)
+
+
+def get_queue_stats(backend_name="default", queue_name=None):
+    """
+    Get queue statistics.
+
+    Args:
+        backend_name: Backend name (default: "default").
+        queue_name: Optional queue name to filter tasks.
+
+    Returns:
+        Dict with queue statistics: the counts per status
+        (``pending_count``, ``running_count``, ``successful_count``,
+        ``failed_count``), the number of delayed tasks not yet due
+        (``delayed_count``), and the time the oldest and newest pending
+        task started waiting (``oldest_pending_waiting_since``,
+        ``newest_pending_waiting_since``), ``max(enqueued_at, run_after)``,
+        None when the queue has none. ``pending_count`` is the count of
+        :func:`get_pending_task_count`, so it leaves out the delayed tasks.
+
+    Example:
+        >>> from django_database_task import get_queue_stats
+        >>> stats = get_queue_stats(queue_name="emails")
+        >>> stats["oldest_pending_waiting_since"]
+        datetime.datetime(2026, 9, 30, 1, 2, 3, tzinfo=datetime.timezone.utc)
+    """
+    backend = task_backends[backend_name]
+    return backend.get_queue_stats(queue_name=queue_name)
+
+
 def run_task_by_id(task_id, worker_id=None, allow_retry=False):
     """
     Execute a specific task by its ID.

@@ -17,6 +17,7 @@ A database-backed task queue backend for Django's built-in task framework.
 - **Async support** - Supports async task functions
 - **Graceful shutdown** - Workers finish the running task before exiting on `SIGTERM`
 - **Crash recovery** - Tasks stranded in `RUNNING` by a killed worker are found and requeued
+- **Monitoring** - Counts per status and the age of the oldest pending task, from Python or `/tasks/status/`
 - **Job scheduler friendly** - Opt-in exit codes that tell an idle run from a failed one, plus structured log fields for JP1 / Hinemos / cron / systemd timers
 - **Instant pickup on PostgreSQL** - Optional `LISTEN`/`NOTIFY` broker that wakes the worker the moment a task is saved, with no extra service to run
 - **Google Cloud Tasks integration** - Optional backend for GAE/Cloud Run with auto-detection
@@ -917,6 +918,96 @@ progress report, and it is not JSON. Run with `-v 0` to silence it and keep the
 log stream as the only output, or leave it on and let the scheduler capture it
 as the job's console log.
 
+## Monitoring
+
+Queue state and task duration are exposed without a dependency on a
+monitoring system, so a collector or a dashboard reads them through the
+library instead of querying the `DatabaseTask` model itself.
+
+`get_queue_stats()` returns the counts per status, the number of delayed tasks
+that have not come due, and the time the oldest and newest pending task
+started waiting: `max(enqueued_at, run_after)`. How long the oldest pending
+task has been waiting is the signal a stuck queue gives: the counts can look
+healthy while nothing is serving the queue.
+
+```python
+from django.utils import timezone
+
+from django_database_task import get_queue_stats
+
+stats = get_queue_stats()
+if stats["oldest_pending_waiting_since"]:
+    age = timezone.now() - stats["oldest_pending_waiting_since"]
+    print(f"oldest pending task has waited for {age.total_seconds():.0f}s")
+```
+
+| Key | Value |
+|-----|-------|
+| `pending_count` | READY tasks a worker would pick up now: `run_after` unset or passed |
+| `running_count` | RUNNING tasks |
+| `successful_count` | SUCCESSFUL tasks still stored |
+| `failed_count` | FAILED tasks still stored |
+| `delayed_count` | READY tasks whose `run_after` has not come |
+| `oldest_pending_waiting_since` | When the pending task that has waited longest started waiting, or `None` |
+| `newest_pending_waiting_since` | When the pending task that has waited least started waiting, or `None` |
+
+With `queue_name="emails"` the numbers cover that queue alone, and
+`backend_name` picks the backend as in the other functions. The keys are the
+ones `get_queue_stats()` of
+[django-tasks-redis](https://github.com/tokibito/django-tasks-redis) returns,
+so a collector written for one reads the other. One difference: here
+`pending_count` is the count `get_pending_task_count()` and `/tasks/status/`
+have always returned, which leaves out a task whose `run_after` has not come,
+and such a task is counted in `delayed_count` alone, so the two add up to the
+number of READY tasks. A delayed task that has come due starts waiting at its
+`run_after`, not at `enqueued_at`, so a task scheduled for later does not read
+as queue age.
+
+`get_task_counts()` returns the counts per status alone, keyed by status, with
+the delayed tasks counted as READY:
+
+```python
+from django_database_task import get_task_counts
+
+get_task_counts()
+# {'READY': 3, 'RUNNING': 1, 'FAILED': 0, 'SUCCESSFUL': 42}
+```
+
+Both are one aggregate query over the tasks of the backend, and both call a
+method of the backend (`get_queue_stats()` and `get_status_counts()`), so a
+backend subclass can override them. The counts include every stored result,
+so they shrink when `purge_completed_database_tasks` runs. The same stats are
+served over HTTP by [`GET /tasks/status/`](#get-tasksstatus).
+
+Task duration is read from Django's `task_finished` signal, which the backend
+sends with the finished `TaskResult` — for a run that failed as well as one
+that returned. `finished_at` minus `last_attempted_at` is the wall time of the
+last attempt:
+
+```python
+# myproject/monitoring.py
+from django.tasks.signals import task_finished
+
+
+def record_task_duration(sender, task_result, **kwargs):
+    if task_result.finished_at and task_result.last_attempted_at:
+        duration = task_result.finished_at - task_result.last_attempted_at
+        print(f"{task_result.id} took {duration.total_seconds():.3f}s")
+
+
+task_finished.connect(record_task_duration)
+```
+
+Connect it where Django loads it, for example an app config's `ready()`. The
+wall time is measured from the claim, so it is not the same number as the
+`duration_ms` on the log records (see [Structured logging](#structured-logging)),
+which is the time the task function itself spent running, measured with
+`time.monotonic()`. The signal is not sent for a task whose function could not
+be imported, since there is no task object to send it with, nor for a task
+`requeue_stale_database_tasks` marks FAILED: a duration monitor does not see
+those tasks. They show up in the failed count, and the first in the
+`Task could not be started` log record.
+
 ## Programmatic API
 
 You can also process tasks programmatically without management commands:
@@ -926,6 +1017,8 @@ from django_database_task import (
     process_one_task,
     process_tasks,
     get_pending_task_count,
+    get_queue_stats,
+    get_task_counts,
     requeue_stale_tasks,
     run_task_by_id,
 )
@@ -945,6 +1038,10 @@ results = process_tasks(queue_name="emails", max_tasks=5)
 # Get pending task count
 count = get_pending_task_count()
 print(f"Pending tasks: {count}")
+
+# Get the counts per status and the queue age (see Monitoring)
+stats = get_queue_stats()
+counts = get_task_counts()
 
 # Execute a specific task by ID
 result = run_task_by_id("550e8400-e29b-41d4-a716-446655440000")
@@ -995,7 +1092,7 @@ urlpatterns = [
 |----------|--------|-------------|
 | `/tasks/run/` | POST | Process multiple pending tasks |
 | `/tasks/run-one/` | POST | Process a single pending task |
-| `/tasks/status/` | GET | Get pending task count |
+| `/tasks/status/` | GET | Get the queue statistics |
 | `/tasks/execute/<uuid>/` | POST | Execute a specific task by ID |
 | `/tasks/purge/` | GET, POST | Delete completed tasks |
 
@@ -1045,8 +1142,22 @@ or
 
 Response:
 ```json
-{"pending_count": 5}
+{
+  "pending_count": 5,
+  "running_count": 1,
+  "successful_count": 120,
+  "failed_count": 2,
+  "delayed_count": 3,
+  "oldest_pending_waiting_since": "2026-09-30T01:02:03.456Z",
+  "newest_pending_waiting_since": "2026-09-30T01:04:05.678Z"
+}
 ```
+
+The body is what `get_queue_stats()` returns (see [Monitoring](#monitoring)),
+with the times in ISO 8601 to the millisecond, or `null` when no task is
+pending. `pending_count` is the same number as before the other keys were
+added. For a backend that is not a database backend, only `pending_count`
+is returned.
 
 #### POST `/tasks/execute/<uuid>/`
 

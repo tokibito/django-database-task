@@ -288,7 +288,7 @@ class RunOneTaskView(JSONBodyBackendAuthMixin, View):
 
 class TaskStatusView(BackendAuthMixin, View):
     """
-    Get pending task count via HTTP GET.
+    Get the queue statistics via HTTP GET.
 
     Query parameters:
         queue_name: Optional queue name to filter tasks
@@ -296,8 +296,17 @@ class TaskStatusView(BackendAuthMixin, View):
 
     Response:
         {
-            "pending_count": 5
+            "pending_count": 5,
+            "running_count": 1,
+            "successful_count": 120,
+            "failed_count": 2,
+            "delayed_count": 3,
+            "oldest_pending_waiting_since": "2026-09-30T01:02:03.456Z",
+            "newest_pending_waiting_since": "2026-09-30T01:04:05.678Z"
         }
+
+    A backend without get_queue_stats() (one that is not a database backend)
+    returns only ``pending_count``, as this endpoint always has.
     """
 
     auth_endpoint = "status"
@@ -306,6 +315,10 @@ class TaskStatusView(BackendAuthMixin, View):
     def get(self, request):
         queue_name = request.GET.get("queue_name")
         backend_name = request.GET.get("backend_name", "default")
+
+        get_queue_stats = getattr(get_backend(backend_name), "get_queue_stats", None)
+        if get_queue_stats is not None:
+            return JsonResponse(get_queue_stats(queue_name=queue_name))
 
         count = get_pending_task_count(
             queue_name=queue_name,
