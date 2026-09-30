@@ -2,7 +2,6 @@ import asyncio
 import logging
 import time
 import traceback
-import warnings
 from functools import cached_property
 from importlib import import_module
 from inspect import iscoroutinefunction
@@ -75,11 +74,6 @@ class DatabaseTaskBackend(BaseTaskBackend):
     # option takes precedence over it.
     broker_class = None
 
-    # Set on an instance once a broker that still overrides enqueue()
-    # rather than notify() has been reported, so the deprecation warning is
-    # emitted once per backend.
-    _legacy_broker_enqueue_warned = False
-
     def __init__(self, alias, params):
         super().__init__(alias, params)
         # Built eagerly so a misconfigured broker is reported when the
@@ -119,39 +113,13 @@ class DatabaseTaskBackend(BaseTaskBackend):
             return
 
         try:
-            self._call_broker(task_result)
+            self.broker.notify(task_result)
         except Exception:
             logger.exception(
                 "Broker %s failed to notify about task %s",
                 type(self.broker).__name__,
                 task_result.id,
             )
-
-    def _call_broker(self, task_result):
-        """
-        Call the broker, through a deprecated enqueue() override if it has
-        one, so a broker written against 0.4 keeps being told about tasks
-        rather than silently going quiet.
-        """
-        # A broker need not subclass TaskBroker, so it may have no
-        # enqueue() at all; that is the new shape, not a legacy one.
-        implementation = getattr(type(self.broker), "enqueue", None)
-        if implementation is None or getattr(
-            implementation, "_is_library_notify", False
-        ):
-            return self.broker.notify(task_result)
-
-        if not self._legacy_broker_enqueue_warned:
-            warnings.warn(
-                f"{type(self.broker).__name__}.enqueue() is deprecated and "
-                "will be ignored in django-database-task 0.6. Rename it to "
-                "notify().",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-            self._legacy_broker_enqueue_warned = True
-
-        return self.broker.enqueue(task_result)
 
     def get_auth_handlers(self, endpoint=None):
         """

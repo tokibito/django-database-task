@@ -63,21 +63,6 @@ class TaskBroker:
         """
         raise NotImplementedError(f"{type(self).__name__} must implement notify().")
 
-    def enqueue(self, task_result):
-        """
-        Notify the external service.
-
-        .. deprecated:: 0.5
-            Renamed to notify(). The backend still calls an enqueue()
-            a broker overrides, with a DeprecationWarning; that stops
-            working in 0.6.
-        """
-        return self.notify(task_result)
-
-    # Marks the implementation above as this library's, so a broker that
-    # overrides enqueue() can be told apart from one that inherits it.
-    enqueue._is_library_notify = True
-
     def resolve_queue(self, queue_name):
         """
         Translate a Django queue name into the broker's queue identifier.

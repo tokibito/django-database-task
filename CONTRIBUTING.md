@@ -160,7 +160,7 @@ Projects depend on the settings, the URLs and the management commands, so a
 change to any of them needs a path that keeps working for someone who upgrades
 without reading the release notes. Where something has to go, deprecate it
 first: keep it working with a `DeprecationWarning` that names the version it is
-removed in, as `TaskBroker.enqueue()` does.
+removed in, as `TaskBroker.enqueue()` did from 0.5 until its removal in 0.6.
 
 The tests are the safety net for this. When a refactor leaves the existing
 tests passing unmodified, that is the evidence that behaviour did not change.
