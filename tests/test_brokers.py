@@ -125,11 +125,11 @@ class TestNotifyBroker:
 
 
 @pytest.mark.django_db
-class TestDeprecatedEnqueue:
-    """Tests for brokers written against the 0.4 method name."""
+class TestRemovedEnqueue:
+    """Tests for brokers written against the 0.4 method name, removed in 0.6."""
 
-    def test_an_override_is_still_called_and_warns(self):
-        """A broker with enqueue() keeps being told, rather than going quiet."""
+    def test_an_override_is_no_longer_called(self, caplog, recwarn):
+        """The failure to notify is logged, and the task stays in the database."""
         notified = []
 
         class LegacyBroker(TaskBroker):
@@ -138,41 +138,18 @@ class TestDeprecatedEnqueue:
 
         backend = make_backend(BROKER=LegacyBroker)
 
-        with pytest.warns(DeprecationWarning, match="enqueue"):
-            result = backend.enqueue(simple_task, (1, 2), {})
+        result = backend.enqueue(simple_task, (1, 2), {})
 
-        assert [r.id for r in notified] == [result.id]
-
-    def test_the_warning_is_emitted_once_per_backend(self, recwarn):
-        class LegacyBroker(TaskBroker):
-            def enqueue(self, task_result):
-                pass
-
-        backend = make_backend(BROKER=LegacyBroker)
-        backend.enqueue(simple_task, (1, 2), {})
-        backend.enqueue(simple_task, (1, 2), {})
-
-        assert (
-            len([w for w in recwarn.list if issubclass(w.category, DeprecationWarning)])
-            == 1
-        )
-
-    def test_a_broker_on_the_new_name_does_not_warn(self, recwarn):
-        backend = make_backend(BROKER=RecordingBroker)
-
-        backend.enqueue(simple_task, (1, 2), {})
-
+        assert notified == []
+        assert DatabaseTask.objects.get(id=result.id).status == "READY"
+        assert "LegacyBroker failed to notify about task" in caplog.text
+        assert "LegacyBroker must implement notify()" in caplog.text
         assert [
             w for w in recwarn.list if issubclass(w.category, DeprecationWarning)
         ] == []
 
-    def test_the_inherited_alias_still_works(self):
-        """Calling broker.enqueue() by hand reaches notify()."""
-        broker = RecordingBroker(backend=None)
-
-        broker.enqueue("task-result")
-
-        assert broker.notified == ["task-result"]
+    def test_the_alias_is_gone(self):
+        assert not hasattr(TaskBroker, "enqueue")
 
 
 class TestBrokerAuthHandlers:

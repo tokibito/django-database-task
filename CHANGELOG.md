@@ -90,6 +90,20 @@
   changes.
   ([#34](https://github.com/tokibito/django-database-task/issues/34))
 
+### Removed
+
+- `TaskBroker.enqueue()`, deprecated in 0.5 and removed here as announced. A
+  broker that overrides it instead of `notify()` is no longer called: the
+  backend calls `notify()`, which raises `NotImplementedError` on
+  `TaskBroker`, and logs `Broker X failed to notify about task Y` at ERROR
+  for every task, as for any broker failure. The task is saved as before, so
+  `run_database_tasks` and the HTTP endpoints still pick it up, but the
+  external service is no longer told about it. Code that called
+  `broker.enqueue()` by hand gets an `AttributeError`; call `notify()`.
+  Bundled brokers and the `BROKER` option are unaffected, as are brokers
+  already on `notify()`; only a broker written by hand against 0.4 that was
+  not renamed, which has warned since 0.5, needs the change.
+
 ### Fixed
 
 - A task could run twice when more than one worker polled the same queue.
