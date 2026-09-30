@@ -2,6 +2,7 @@
 
 import os
 import signal
+import sys
 import threading
 import time
 
@@ -13,6 +14,15 @@ from django_database_task.shutdown import (
     get_active_shutdown,
     is_shutdown_requested,
     signal_name,
+)
+
+# On Windows os.kill() does not deliver SIGTERM or SIGINT to a handler: any
+# signal other than CTRL_C_EVENT / CTRL_BREAK_EVENT terminates the process
+# outright, so a run of these tests there looks like a hang, not a failure.
+# Installing the handlers works everywhere and is covered separately.
+posix_signals = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="os.kill() cannot deliver a signal to the test process on Windows",
 )
 
 
@@ -81,7 +91,9 @@ class TestGracefulShutdownState:
         assert elapsed < 5
 
 
-class TestGracefulShutdownSignals:
+class TestGracefulShutdownHandlers:
+    """Installing the handlers works on every platform Python runs on."""
+
     def test_install_and_uninstall_restores_handlers(self):
         """Original signal handlers are restored on exit."""
         original_term = signal.getsignal(signal.SIGTERM)
@@ -96,6 +108,36 @@ class TestGracefulShutdownSignals:
         assert shutdown.installed is False
         assert signal.getsignal(signal.SIGTERM) is original_term
         assert signal.getsignal(signal.SIGINT) is original_int
+
+    def test_custom_signals(self):
+        """Only the requested signals are handled."""
+        original_int = signal.getsignal(signal.SIGINT)
+
+        with GracefulShutdown(signals=(signal.SIGTERM,)):
+            assert signal.getsignal(signal.SIGINT) is original_int
+
+    def test_install_outside_main_thread_is_ignored(self):
+        """Installing from a non-main thread logs instead of raising."""
+        shutdown = GracefulShutdown()
+        errors = []
+
+        def install():
+            try:
+                shutdown.install()
+            except Exception as e:  # pragma: no cover - should not happen
+                errors.append(e)
+
+        thread = threading.Thread(target=install)
+        thread.start()
+        thread.join()
+
+        assert errors == []
+        assert shutdown.installed is False
+
+
+@posix_signals
+class TestGracefulShutdownSignals:
+    """A delivered signal requests a shutdown."""
 
     def test_sigterm_requests_shutdown(self):
         """SIGTERM requests a graceful shutdown instead of killing."""
@@ -165,31 +207,6 @@ class TestGracefulShutdownSignals:
                 os.kill(os.getpid(), signal.SIGTERM)
 
         assert "Received SIGTERM" not in caplog.text
-
-    def test_custom_signals(self):
-        """Only the requested signals are handled."""
-        original_int = signal.getsignal(signal.SIGINT)
-
-        with GracefulShutdown(signals=(signal.SIGTERM,)):
-            assert signal.getsignal(signal.SIGINT) is original_int
-
-    def test_install_outside_main_thread_is_ignored(self):
-        """Installing from a non-main thread logs instead of raising."""
-        shutdown = GracefulShutdown()
-        errors = []
-
-        def install():
-            try:
-                shutdown.install()
-            except Exception as e:  # pragma: no cover - should not happen
-                errors.append(e)
-
-        thread = threading.Thread(target=install)
-        thread.start()
-        thread.join()
-
-        assert errors == []
-        assert shutdown.installed is False
 
 
 class TestShutdownTimeout:
