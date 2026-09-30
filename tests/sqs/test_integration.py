@@ -43,7 +43,11 @@ REGION = "us-east-1"
 @pytest.fixture(scope="session")
 def sqs_endpoint():
     """A moto server standing in for SQS, for the whole session."""
-    server = moto_server.ThreadedMotoServer(port=0)
+    # Bound to the loopback address rather than moto's default 0.0.0.0: the
+    # endpoint is built from the bound address, and Windows refuses a
+    # connection to 0.0.0.0 (WinError 10049). It also keeps moto off the
+    # network.
+    server = moto_server.ThreadedMotoServer(ip_address="127.0.0.1", port=0)
     server.start()
     host, port = server.get_host_and_port()
     try:

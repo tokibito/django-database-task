@@ -135,6 +135,11 @@
   that `wait()` blocked, not the exact duration. Only the test suite changes;
   the package is unaffected.
   ([#27](https://github.com/tokibito/django-database-task/issues/27))
+- The SQS integration tests failed at setup on Windows. They started moto on
+  its default address, `0.0.0.0`, and connected to the address the server
+  reported, which Windows refuses (`WinError 10049`). moto is now bound to
+  `127.0.0.1`, which also keeps it off the network. Only the test suite
+  changes; the package is unaffected.
 
 ### Documentation
 
