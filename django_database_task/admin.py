@@ -21,7 +21,7 @@ class DatabaseTaskAdmin(admin.ModelAdmin):
         "started_at",
         "finished_at",
     ]
-    list_filter = ["status", "queue_name", "backend_name"]
+    list_filter = ["status", "queue_name", "backend_name", "task_path", "priority"]
     search_fields = ["id", "task_path"]
     ordering = ["-created_at"]
     readonly_fields = [

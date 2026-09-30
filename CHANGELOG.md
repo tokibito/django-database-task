@@ -10,6 +10,11 @@
   one. The terms follow the django-tasks-redis catalogues, so the two
   packages read the same under each locale.
   ([#33](https://github.com/tokibito/django-database-task/issues/33))
+- **Task path and priority filters in the admin.** The task list's sidebar
+  now filters by task path and priority as well as by status, queue and
+  backend, each listing the distinct values of the stored tasks. Existing
+  projects need no changes.
+  ([#29](https://github.com/tokibito/django-database-task/issues/29))
 
 ### Fixed
 

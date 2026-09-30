@@ -2008,7 +2008,7 @@ verifies.
 The package includes a Django Admin integration to view and manage tasks:
 
 - Task list with status badges
-- Filter by status, queue, backend
+- Filter by status, queue, backend, task path, priority
 - Search by task ID or path
 - View task arguments and results
 

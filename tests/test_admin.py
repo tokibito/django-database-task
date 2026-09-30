@@ -320,6 +320,55 @@ class TestColumnHeaders:
             assert str(header) == japanese
 
 
+@pytest.mark.django_db
+class TestListFilters:
+    def changelist(self, model_admin, request_factory, admin_user, **params):
+        request = request_factory.get("/admin/", params)
+        request.user = admin_user
+        return model_admin.get_changelist_instance(request)
+
+    def test_filter_by_task_path(self, model_admin, request_factory, admin_user):
+        """The task list narrows to one task function (#29)."""
+        simple = simple_task.enqueue(1, 2)
+        failing_task.enqueue()
+
+        changelist = self.changelist(
+            model_admin,
+            request_factory,
+            admin_user,
+            task_path=simple_task.module_path,
+        )
+
+        assert [str(t.id) for t in changelist.queryset] == [simple.id]
+
+    def test_filter_by_priority(self, model_admin, request_factory, admin_user):
+        """The task list narrows to one priority (#29)."""
+        simple_task.enqueue(1, 2)
+        urgent = simple_task.using(priority=10).enqueue(3, 4)
+
+        changelist = self.changelist(
+            model_admin, request_factory, admin_user, priority="10"
+        )
+
+        assert [str(t.id) for t in changelist.queryset] == [urgent.id]
+
+    def test_choices_list_the_stored_values(
+        self, model_admin, request_factory, admin_user
+    ):
+        """Each filter offers the distinct values of the stored tasks (#29)."""
+        simple_task.enqueue(1, 2)
+        simple_task.using(priority=10).enqueue(3, 4)
+        failing_task.enqueue()
+
+        changelist = self.changelist(model_admin, request_factory, admin_user)
+        filters = {f.field_path: f for f in changelist.filter_specs}
+
+        assert sorted(filters["task_path"].lookup_choices) == sorted(
+            [simple_task.module_path, failing_task.module_path]
+        )
+        assert sorted(filters["priority"].lookup_choices) == [0, 10]
+
+
 class MockMessages:
     """Mock messages framework for testing."""
 
