@@ -49,7 +49,8 @@
   there, because on Windows `os.kill()` terminates the process instead of
   running the handler, and a whole-suite run used to look like a hang; the
   tests that only install the handlers now sit in their own classes and run
-  everywhere. Only the test suite changes; the package is unaffected.
+  everywhere. CI gained a Windows job that runs the suite on SQLite. Only
+  the test suite and CI change; the package is unaffected.
   ([#27](https://github.com/tokibito/django-database-task/issues/27))
 - **`GET /tasks/status/` returns the queue stats.** The response carries the
   keys of `get_queue_stats()` alongside `pending_count`, with the waiting

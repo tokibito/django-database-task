@@ -97,6 +97,31 @@ jobs:
         run: |
           pytest tests/ -v
 
+  # The suite runs on the in-memory SQLite database, so a Windows runner
+  # needs nothing beyond Python and the extras. The tests that deliver a
+  # signal with os.kill() are skipped on Windows (see CONTRIBUTING.md);
+  # -rs lists them in the log. The rest runs.
+  test-windows:
+    runs-on: windows-latest
+    name: test (Windows)
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,cloudtasks,sqs,postgres]"
+
+      - name: Run tests
+        run: |
+          pytest tests/ -v -rs
+
   lint:
     runs-on: ubuntu-latest
     steps:
