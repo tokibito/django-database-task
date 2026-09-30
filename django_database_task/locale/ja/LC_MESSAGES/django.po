@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-database-task 0.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-30 05:44+0000\n"
+"POT-Creation-Date: 2026-09-30 17:27+0000\n"
 "PO-Revision-Date: 2025-12-27 00:00+0000\n"
 "Last-Translator: Shinya Okano <tokibito@gmail.com>\n"
 "Language-Team: Japanese\n"
@@ -129,31 +129,31 @@ msgstr "一度に処理するタスク数 (デフォルト: 1000)"
 msgid "Show what would happen without changing anything"
 msgstr "何も変更せずに、何が行われるかを表示"
 
-#: management/commands/run_database_tasks.py:53
+#: management/commands/run_database_tasks.py:55
 msgid "Execute tasks queued in the database"
 msgstr "データベースのキューに登録されたタスクを実行"
 
-#: management/commands/run_database_tasks.py:60
+#: management/commands/run_database_tasks.py:62
 msgid "Queue name to process (all queues if not specified)"
 msgstr "処理するキュー名 (指定しない場合はすべてのキュー)"
 
-#: management/commands/run_database_tasks.py:66
+#: management/commands/run_database_tasks.py:68
 msgid "Backend name (default: default)"
 msgstr "バックエンド名 (デフォルト: default)"
 
-#: management/commands/run_database_tasks.py:71
+#: management/commands/run_database_tasks.py:73
 msgid "Continuous mode (keep polling even when no tasks)"
 msgstr "継続モード (タスクがなくてもポーリングを続ける)"
 
-#: management/commands/run_database_tasks.py:77
+#: management/commands/run_database_tasks.py:79
 msgid "Polling interval in seconds for continuous mode (default: 5)"
 msgstr "継続モードのポーリング間隔（秒）(デフォルト: 5)"
 
-#: management/commands/run_database_tasks.py:83
+#: management/commands/run_database_tasks.py:85
 msgid "Maximum number of tasks to process (0=unlimited, default: 0)"
 msgstr "処理する最大タスク数 (0=無制限、デフォルト: 0)"
 
-#: management/commands/run_database_tasks.py:90
+#: management/commands/run_database_tasks.py:92
 msgid ""
 "Where to look for tasks: 'db' polls the database, 'broker' receives from the "
 "backend's broker, 'both' does the broker first and falls back to the "
@@ -165,7 +165,7 @@ msgstr ""
 "バックする。'auto' (デフォルト) は、受信できるブローカーがバックエンドにあれ"
 "ば 'both'、なければ 'db' になる"
 
-#: management/commands/run_database_tasks.py:102
+#: management/commands/run_database_tasks.py:104
 msgid ""
 "Seconds to wait for a broker message before looking again. Replaces --"
 "interval as the idle wait when receiving from a broker (default: 20)"
@@ -173,11 +173,21 @@ msgstr ""
 "再確認するまでブローカーのメッセージを待つ秒数。ブローカーから受信する場合、"
 "アイドル時の待機として --interval の代わりに使われる (デフォルト: 20)"
 
-#: management/commands/run_database_tasks.py:112
+#: management/commands/run_database_tasks.py:114
 msgid "Maximum number of broker messages to receive at a time (default: 1)"
 msgstr "一度に受信するブローカーメッセージの最大数 (デフォルト: 1)"
 
-#: management/commands/run_database_tasks.py:120
+#: management/commands/run_database_tasks.py:123
+msgid ""
+"Run this many worker processes from one command, each a copy of this command "
+"without --workers. With --continuous a worker that exits is replaced; "
+"without it the command exits when every worker has (default: 1)"
+msgstr ""
+"このコマンドから起動するワーカープロセスの数。各ワーカーは --workers を除いたこのコマンドの"
+"コピー。--continuous 指定時は終了したワーカーを再起動し、未指定時は全ワーカーが終了する"
+"とコマンドも終了する (デフォルト: 1)"
+
+#: management/commands/run_database_tasks.py:134
 msgid ""
 "Maximum seconds to wait for the running task after receiving SIGTERM/SIGINT "
 "before forcing exit (0=wait indefinitely, default: 0)"
@@ -185,7 +195,7 @@ msgstr ""
 "SIGTERM/SIGINTを受信してから強制終了するまで、実行中のタスクを待つ最大秒数 "
 "(0=無期限に待つ、デフォルト: 0)"
 
-#: management/commands/run_database_tasks.py:129
+#: management/commands/run_database_tasks.py:143
 msgid ""
 "Do not install SIGTERM/SIGINT handlers; the process is terminated "
 "immediately, even while a task is running"
@@ -193,7 +203,7 @@ msgstr ""
 "SIGTERM/SIGINTハンドラーを設定しない。タスクの実行中でもプロセスは即座に終了"
 "する"
 
-#: management/commands/run_database_tasks.py:139
+#: management/commands/run_database_tasks.py:153
 msgid ""
 "Exit with this code when no task was processed, so a job scheduler can tell "
 "an idle run from a real one (0=exit normally, default: 0)"
@@ -201,7 +211,7 @@ msgstr ""
 "タスクを1件も処理しなかった場合にこの終了コードで終了する。ジョブスケジュー"
 "ラーが空振りの実行を区別できるようにする (0=通常どおり終了、デフォルト: 0)"
 
-#: management/commands/run_database_tasks.py:150
+#: management/commands/run_database_tasks.py:164
 msgid ""
 "Exit with this code when at least one task failed or could not be run. Takes "
 "precedence over --empty-exit-code (0=exit normally, default: 0)"

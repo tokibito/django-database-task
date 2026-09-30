@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`--workers N` on `run_database_tasks`.** The command keeps N worker
+  processes running from one invocation. Each worker is the command run
+  again without `--workers`, so every other option reaches it unchanged and
+  it is the single-process worker it has always been, with its own worker id
+  and database connection. With `--continuous` a worker that exits is
+  replaced, after a growing delay for one that keeps failing right after
+  starting; without it the command exits once every worker has drained the
+  queue. `SIGTERM` and `SIGINT` (Ctrl-Break on Windows) are forwarded to the
+  workers and waited for within `--shutdown-timeout`, a second signal kills
+  them, `SIGTTIN` and `SIGTTOU` add and remove a worker on POSIX, and the exit
+  code is decided from what the workers reported, honouring
+  `--empty-exit-code` and `--failed-exit-code`. `--max-tasks` with
+  `--continuous` replaces a worker after that many tasks, the way gunicorn's
+  `max_requests` does. The supervisor, `django_database_task.supervisor`, is
+  deliberately small: no liveness check, since a stuck worker is what
+  `requeue_stale_database_tasks` is for. It refuses more than one worker on
+  SQLite, which has no row locks. The README's new *Running several workers*
+  section sets it beside systemd, Kubernetes and supervisord. The default is
+  1, the single process the command has always been, so existing projects
+  need no changes.
+  ([#25](https://github.com/tokibito/django-database-task/issues/25))
+
 ## 0.6.0
 
 ### Added
