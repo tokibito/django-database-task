@@ -2,11 +2,16 @@
 
 import os
 import signal
+import sqlite3
+import subprocess
 import sys
 import threading
 import time
+import uuid
+from contextlib import closing
 from datetime import timedelta
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -40,6 +45,8 @@ posix_signals = pytest.mark.skipif(
     sys.platform == "win32",
     reason="os.kill() cannot deliver a signal to the test process on Windows",
 )
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.mark.django_db
@@ -232,6 +239,125 @@ class TestRunDatabaseTasksGracefulShutdown:
         db_task = DatabaseTask.objects.get(id=result.id)
         assert db_task.status == TaskResultStatus.SUCCESSFUL
         assert db_task.return_value_json < 100
+
+
+class TestRunDatabaseTasksWorkerProcess:
+    """
+    The shutdown path through a real worker process, on every platform.
+
+    The tests above signal the test process itself, which Windows cannot do.
+    Here the worker is a child process and the signal is what a supervisor
+    sends there: SIGTERM on POSIX, and on Windows Ctrl-Break to a process
+    group of its own, the way a service manager that starts the worker with
+    CREATE_NEW_PROCESS_GROUP stops it. Ctrl-C cannot be used in a test: the
+    event would reach the pytest process, which shares the console.
+
+    The child cannot see the test's in-memory database, so the children share
+    a SQLite file instead, whatever DJANGO_DATABASE_ENGINE says, and the test
+    reads the task's status from that file with the sqlite3 module.
+    """
+
+    @pytest.fixture
+    def database_path(self, tmp_path):
+        path = tmp_path / "worker.sqlite3"
+        self.run_child("-m", "django", "migrate", database_path=path)
+        return path
+
+    def child_env(self, database_path):
+        return {
+            **os.environ,
+            "DJANGO_SETTINGS_MODULE": "tests.settings",
+            "DJANGO_DATABASE_ENGINE": "sqlite3",
+            "DJANGO_SQLITE_NAME": str(database_path),
+            # The output is read after the child exits, but a crash before
+            # then must not lose what was written so far.
+            "PYTHONUNBUFFERED": "1",
+        }
+
+    def run_child(self, *args, database_path):
+        completed = subprocess.run(
+            [sys.executable, *args],
+            cwd=PROJECT_ROOT,
+            env=self.child_env(database_path),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        return completed.stdout
+
+    def enqueue_slow_task(self, database_path, seconds):
+        output = self.run_child(
+            "-c",
+            "import django; django.setup(); "
+            "from tests.tasks import slow_task; "
+            f"print(slow_task.enqueue(seconds={seconds}).id)",
+            database_path=database_path,
+        )
+        return output.strip()
+
+    def task_status(self, database_path, task_id):
+        with closing(sqlite3.connect(database_path)) as db:
+            row = db.execute(
+                f"SELECT status FROM {DatabaseTask._meta.db_table} WHERE id = ?",
+                (uuid.UUID(task_id).hex,),
+            ).fetchone()
+        return row[0]
+
+    def start_worker(self, database_path):
+        kwargs = {}
+        if sys.platform == "win32":
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        return subprocess.Popen(
+            [sys.executable, "-m", "django", "run_database_tasks", "--continuous"],
+            cwd=PROJECT_ROOT,
+            env=self.child_env(database_path),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            **kwargs,
+        )
+
+    def wait_until_running(self, child, database_path, task_id, timeout=30):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status = self.task_status(database_path, task_id)
+            if status == TaskResultStatus.RUNNING:
+                return
+            if child.poll() is not None:
+                output, _ = child.communicate()
+                pytest.fail(f"Worker exited with {child.returncode} early:\n{output}")
+            time.sleep(0.05)
+        pytest.fail(f"Task {task_id} was not started within {timeout} seconds")
+
+    def test_supervisor_signal_finishes_the_running_task(self, database_path):
+        """The signal a supervisor sends lets the running task finish first."""
+        if sys.platform == "win32":
+            sig, expected_name = signal.CTRL_BREAK_EVENT, "SIGBREAK"
+        else:
+            sig, expected_name = signal.SIGTERM, "SIGTERM"
+
+        task_id = self.enqueue_slow_task(database_path, seconds=2)
+
+        child = self.start_worker(database_path)
+        try:
+            self.wait_until_running(child, database_path, task_id)
+            child.send_signal(sig)
+            output, _ = child.communicate(timeout=30)
+        except BaseException:
+            child.kill()
+            child.communicate()
+            raise
+
+        assert child.returncode == 0, output
+        assert f"Received {expected_name}" in output
+        assert "Shutdown complete" in output
+        assert "Total tasks processed: 1" in output
+        assert self.task_status(database_path, task_id) == TaskResultStatus.SUCCESSFUL
 
 
 @pytest.mark.django_db

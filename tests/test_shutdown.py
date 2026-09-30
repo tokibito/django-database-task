@@ -111,6 +111,17 @@ class TestGracefulShutdownHandlers:
         assert signal.getsignal(signal.SIGTERM) is original_term
         assert signal.getsignal(signal.SIGINT) is original_int
 
+    def test_every_default_signal_is_handled(self):
+        """Each default signal gets the handler, SIGBREAK included on Windows."""
+        originals = {s: signal.getsignal(s) for s in DEFAULT_SHUTDOWN_SIGNALS}
+
+        with GracefulShutdown() as shutdown:
+            for signum in DEFAULT_SHUTDOWN_SIGNALS:
+                assert signal.getsignal(signum) == shutdown._handle_signal
+
+        for signum, original in originals.items():
+            assert signal.getsignal(signum) is original
+
     def test_custom_signals(self):
         """Only the requested signals are handled."""
         original_int = signal.getsignal(signal.SIGINT)
@@ -284,6 +295,19 @@ class TestSignalName:
         """Signal numbers are rendered with their name."""
         assert signal_name(signum) == expected
 
+    def test_default_signal_names(self):
+        """Every default signal has a name, so the shutdown report can use it."""
+        for signum in DEFAULT_SHUTDOWN_SIGNALS:
+            assert signal_name(signum) == signal.Signals(signum).name
+
     def test_default_signals(self):
-        """SIGINT and SIGTERM are handled by default."""
-        assert set(DEFAULT_SHUTDOWN_SIGNALS) == {signal.SIGINT, signal.SIGTERM}
+        """SIGINT and SIGTERM are handled by default, plus SIGBREAK on Windows.
+
+        Nothing delivers SIGTERM on Windows; Ctrl-Break is what a supervisor
+        sends to a process group it created, and Python reports it as SIGBREAK.
+        """
+        expected = {signal.SIGINT, signal.SIGTERM}
+        if sys.platform == "win32":
+            expected.add(signal.SIGBREAK)
+
+        assert set(DEFAULT_SHUTDOWN_SIGNALS) == expected
