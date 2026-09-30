@@ -16,17 +16,18 @@ Usage:
 """
 
 import json
-from datetime import timedelta
 
 from django.http import JsonResponse
 from django.tasks import default_task_backend
 from django.tasks.base import TaskResultStatus
-from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
 from .executor import (
+    _completed_tasks,
+    _delete_in_batches,
+    _parse_purge_statuses,
     get_pending_task_count,
     process_one_task,
     process_tasks,
@@ -580,24 +581,12 @@ class PurgeCompletedTasksView(BackendAuthMixin, View):
         if task_path is not None and not isinstance(task_path, str):
             return JsonResponse({"error": "task_path must be a string"}, status=400)
 
-        # Parse statuses
-        statuses = [s.strip().upper() for s in status_str.split(",")]
-        valid_statuses = [TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED]
-        statuses = [s for s in statuses if s in [v.value for v in valid_statuses]]
+        statuses = _parse_purge_statuses(status_str)
 
         if not statuses:
             return JsonResponse({"error": "No valid statuses specified"}, status=400)
 
-        # Build query
-        queryset = DatabaseTask.objects.filter(status__in=statuses)
-
-        if task_path:
-            queryset = queryset.filter(task_path=task_path)
-
-        if days > 0:
-            cutoff_date = timezone.now() - timedelta(days=days)
-            queryset = queryset.filter(finished_at__lt=cutoff_date)
-
+        queryset, _cutoff_date = _completed_tasks(statuses, days, task_path)
         total_count = queryset.count()
 
         if dry_run:
@@ -606,15 +595,7 @@ class PurgeCompletedTasksView(BackendAuthMixin, View):
         if total_count == 0:
             return JsonResponse({"deleted": 0, "dry_run": False})
 
-        # Batch delete
-        deleted_total = 0
-        while True:
-            task_ids = list(queryset.values_list("id", flat=True)[:batch_size])
-            if not task_ids:
-                break
-
-            deleted_count, _ = DatabaseTask.objects.filter(id__in=task_ids).delete()
-            deleted_total += deleted_count
+        deleted_total = sum(_delete_in_batches(queryset, batch_size))
 
         return JsonResponse({"deleted": deleted_total, "dry_run": False})
 
