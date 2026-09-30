@@ -52,8 +52,9 @@ venv/bin/pytest -k "broker and auth"
 
 ### On Windows
 
-The suite is written for Linux, which is what CI runs it on. On Windows one
-group of tests is skipped, and `-rs` lists them in the summary:
+The suite runs on Windows as well, and CI runs it there on Python 3.13 with
+the in-memory SQLite database. One group of tests is skipped, and `-rs` lists
+them in the summary:
 
 - `tests/test_shutdown.py::TestGracefulShutdownSignals`, and in
   `tests/test_commands.py` `TestRunDatabaseTasksGracefulShutdown`,
@@ -197,7 +198,7 @@ added to the CI install.
 - Say what the change is for. A description that explains the problem is worth
   more than one that restates the diff.
 - Keep the tests and the linters green. CI runs the suite against Python 3.12
-  to 3.14 and Django 6.0 and 6.1.
+  to 3.14 and Django 6.0 and 6.1, and on Windows.
 - Add tests for a behaviour change. A bug fix wants the test that fails
   without it.
 
