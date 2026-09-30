@@ -102,21 +102,23 @@ A few things are easy to forget:
   ```
 
 - **Translations.** User-visible strings in `models.py` and `admin.py` go
-  through `gettext_lazy`, and there is a Japanese catalogue. The management
-  commands use `gettext` instead, because argparse cannot format a lazy
-  string; a command's `help` is a property so that it is translated when the
-  parser is built. Adding a string means updating and compiling the
-  catalogue, from inside the app directory:
+  through `gettext_lazy`, and there are Japanese, Simplified Chinese,
+  Brazilian Portuguese and Spanish catalogues. The management commands use
+  `gettext` instead, because argparse cannot format a lazy string; a
+  command's `help` is a property so that it is translated when the parser is
+  built. Adding a string means updating and compiling every catalogue, from
+  inside the app directory:
 
   ```bash
   cd django_database_task
-  PYTHONPATH=.. ../venv/bin/python -m django makemessages -l ja --settings tests.settings
-  # fill in the new msgstr, then
+  PYTHONPATH=.. ../venv/bin/python -m django makemessages -a --settings tests.settings
+  # fill in the new msgstr in each catalogue, then
   PYTHONPATH=.. ../venv/bin/python -m django compilemessages --settings tests.settings
   ```
 
-  Commit both `django.po` and `django.mo`. `makemessages` may also rewrite the
-  `#:` source references; that is only bookkeeping.
+  Commit both `django.po` and `django.mo` of each catalogue; the tests check
+  that every catalogue translates every string. `makemessages` may also
+  rewrite the `#:` source references; that is only bookkeeping.
 
 - **The changelog.** Add a line to the *Unreleased* section of
   `CHANGELOG.md`. Leave the version in `pyproject.toml` alone; releases are cut

@@ -1,0 +1,341 @@
+# Simplified Chinese translations for django-database-task.
+# Copyright (C) 2025 Shinya Okano
+# This file is distributed under the same license as the django-database-task package.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: django-database-task 0.1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-09-30 04:39+0000\n"
+"PO-Revision-Date: 2026-09-30 00:00+0000\n"
+"Last-Translator: Shinya Okano <tokibito@gmail.com>\n"
+"Language-Team: Simplified Chinese\n"
+"Language: zh_Hans\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#: admin.py:82
+msgid "ID"
+msgstr "ID"
+
+#: admin.py:91
+msgid "Task"
+msgstr "任务"
+
+#: admin.py:109
+msgid "Status"
+msgstr "状态"
+
+#: admin.py:117
+msgid "Run selected tasks"
+msgstr "运行所选任务"
+
+#: admin.py:163
+msgid "Retry failed tasks"
+msgstr "重试失败的任务"
+
+#: admin.py:217
+msgid "Requeue tasks stuck in running"
+msgstr "将卡在运行中的任务重新入队"
+
+#: management/commands/purge_completed_database_tasks.py:17
+msgid "Delete completed task records from the database"
+msgstr "从数据库中删除已完成任务的记录"
+
+#: management/commands/purge_completed_database_tasks.py:24
+msgid "Delete tasks completed more than N days ago (0=all, default: 0)"
+msgstr "删除 N 天以前完成的任务（0=全部，默认：0）"
+
+#: management/commands/purge_completed_database_tasks.py:30
+msgid "Target statuses, comma-separated (default: SUCCESSFUL,FAILED)"
+msgstr "目标状态，以逗号分隔（默认：SUCCESSFUL,FAILED）"
+
+#: management/commands/purge_completed_database_tasks.py:36
+msgid "Number of tasks to delete at once (default: 1000)"
+msgstr "每次删除的任务数（默认：1000）"
+
+#: management/commands/purge_completed_database_tasks.py:41
+msgid "Show count only without deleting"
+msgstr "仅显示数量，不删除"
+
+#: management/commands/requeue_stale_database_tasks.py:54
+msgid ""
+"Recover tasks left in RUNNING status by a worker that was killed before it "
+"could write a result"
+msgstr "恢复因工作进程在写入结果前被终止而停留在 RUNNING 状态的任务"
+
+#: management/commands/requeue_stale_database_tasks.py:64
+msgid ""
+"Only touch tasks that have been RUNNING for longer than this, as a number "
+"and a unit: 90s, 15m, 2h, 1d. Required, and it must be longer than your "
+"longest running task - a task still running when its threshold passes is "
+"requeued and ends up running twice"
+msgstr ""
+"仅处理处于 RUNNING 状态超过此时长的任务，以数字加单位指定：90s、15m、2h、1d。"
+"必填，且必须长于运行时间最长的任务——超过此阈值时仍在运行的任务会被重新入队，"
+"最终运行两次"
+
+#: management/commands/requeue_stale_database_tasks.py:75
+msgid "Queue name to recover (all queues if not specified)"
+msgstr "要恢复的队列名称（未指定时为所有队列）"
+
+#: management/commands/requeue_stale_database_tasks.py:81
+msgid "Backend name to recover (all backends if not specified)"
+msgstr "要恢复的后端名称（未指定时为所有后端）"
+
+#: management/commands/requeue_stale_database_tasks.py:88
+#, python-format
+msgid ""
+"Mark a task FAILED instead of requeueing it once it has been handed to this "
+"many workers (0=no limit, default: %(max_attempts)s). Stops a task that "
+"kills its worker from being requeued forever"
+msgstr ""
+"任务已交给这么多个工作进程后，将其标记为 FAILED 而不是重新入队（0=不限，默"
+"认：%(max_attempts)s）。防止导致工作进程终止的任务被无限次重新入队"
+
+#: management/commands/requeue_stale_database_tasks.py:99
+msgid ""
+"Mark every stale task FAILED instead of requeueing it. For tasks that are "
+"not safe to run twice"
+msgstr ""
+"将所有停滞的任务标记为 FAILED 而不是重新入队。适用于运行两次不安全的任务"
+
+#: management/commands/requeue_stale_database_tasks.py:107
+msgid ""
+"Tell the backend's broker about each requeued task. Needed when workers only "
+"receive from a broker, because the message for the killed attempt is already "
+"gone"
+msgstr ""
+"将每个重新入队的任务通知后端的消息代理。当工作进程仅从消息代理接收时需要此选"
+"项，因为被终止的那次尝试的消息已经不存在"
+
+#: management/commands/requeue_stale_database_tasks.py:116
+msgid "Number of tasks to process at once (default: 1000)"
+msgstr "每次处理的任务数（默认：1000）"
+
+#: management/commands/requeue_stale_database_tasks.py:121
+msgid "Show what would happen without changing anything"
+msgstr "显示将会执行的操作，但不做任何更改"
+
+#: management/commands/run_database_tasks.py:53
+msgid "Execute tasks queued in the database"
+msgstr "执行在数据库中排队的任务"
+
+#: management/commands/run_database_tasks.py:60
+msgid "Queue name to process (all queues if not specified)"
+msgstr "要处理的队列名称（未指定时为所有队列）"
+
+#: management/commands/run_database_tasks.py:66
+msgid "Backend name (default: default)"
+msgstr "后端名称（默认：default）"
+
+#: management/commands/run_database_tasks.py:71
+msgid "Continuous mode (keep polling even when no tasks)"
+msgstr "持续模式（没有任务时也继续轮询）"
+
+#: management/commands/run_database_tasks.py:77
+msgid "Polling interval in seconds for continuous mode (default: 5)"
+msgstr "持续模式的轮询间隔秒数（默认：5）"
+
+#: management/commands/run_database_tasks.py:83
+msgid "Maximum number of tasks to process (0=unlimited, default: 0)"
+msgstr "要处理的最大任务数（0=不限，默认：0）"
+
+#: management/commands/run_database_tasks.py:90
+msgid ""
+"Where to look for tasks: 'db' polls the database, 'broker' receives from the "
+"backend's broker, 'both' does the broker first and falls back to the "
+"database, and 'auto' (default) means 'both' when the backend has a broker to "
+"receive from and 'db' otherwise"
+msgstr ""
+"从何处获取任务：'db' 轮询数据库，'broker' 从后端的消息代理接收，'both' 先查看"
+"消息代理再回退到数据库，'auto'（默认）在后端有可接收的消息代理时为 'both'，否"
+"则为 'db'"
+
+#: management/commands/run_database_tasks.py:102
+msgid ""
+"Seconds to wait for a broker message before looking again. Replaces --"
+"interval as the idle wait when receiving from a broker (default: 20)"
+msgstr ""
+"再次查看前等待消息代理消息的秒数。从消息代理接收时，取代 --interval 作为空闲"
+"时的等待（默认：20）"
+
+#: management/commands/run_database_tasks.py:112
+msgid "Maximum number of broker messages to receive at a time (default: 1)"
+msgstr "每次接收的消息代理消息的最大数量（默认：1）"
+
+#: management/commands/run_database_tasks.py:120
+msgid ""
+"Maximum seconds to wait for the running task after receiving SIGTERM/SIGINT "
+"before forcing exit (0=wait indefinitely, default: 0)"
+msgstr ""
+"收到 SIGTERM/SIGINT 后、强制退出前等待正在运行的任务的最长秒数（0=无限期等"
+"待，默认：0）"
+
+#: management/commands/run_database_tasks.py:129
+msgid ""
+"Do not install SIGTERM/SIGINT handlers; the process is terminated "
+"immediately, even while a task is running"
+msgstr "不安装 SIGTERM/SIGINT 处理程序；即使有任务正在运行，进程也会立即终止"
+
+#: management/commands/run_database_tasks.py:139
+msgid ""
+"Exit with this code when no task was processed, so a job scheduler can tell "
+"an idle run from a real one (0=exit normally, default: 0)"
+msgstr ""
+"未处理任何任务时以此代码退出，以便作业调度器区分空转的运行与实际的运行（0=正"
+"常退出，默认：0）"
+
+#: management/commands/run_database_tasks.py:150
+msgid ""
+"Exit with this code when at least one task failed or could not be run. Takes "
+"precedence over --empty-exit-code (0=exit normally, default: 0)"
+msgstr ""
+"至少有一个任务失败或无法运行时以此代码退出。优先于 --empty-exit-code（0=正常"
+"退出，默认：0）"
+
+#: models.py:14
+msgid "task path"
+msgstr "任务路径"
+
+#: models.py:15
+msgid "Module path of the task function"
+msgstr "任务函数的模块路径"
+
+#: models.py:20
+msgid "queue name"
+msgstr "队列名称"
+
+#: models.py:21
+msgid "Queue name"
+msgstr "队列名称"
+
+#: models.py:25
+msgid "priority"
+msgstr "优先级"
+
+#: models.py:26
+msgid "Priority (-100 to 100)"
+msgstr "优先级（-100 到 100）"
+
+#: models.py:30
+msgid "arguments"
+msgstr "参数"
+
+#: models.py:31
+msgid "Arguments (JSON format)"
+msgstr "参数（JSON 格式）"
+
+#: models.py:35
+msgid "keyword arguments"
+msgstr "关键字参数"
+
+#: models.py:36
+msgid "Keyword arguments (JSON format)"
+msgstr "关键字参数（JSON 格式）"
+
+#: models.py:42
+msgid "status"
+msgstr "状态"
+
+#: models.py:43
+msgid "Task status"
+msgstr "任务状态"
+
+#: models.py:48
+msgid "run after"
+msgstr "计划执行时间"
+
+#: models.py:49
+msgid "Earliest execution time"
+msgstr "最早执行时间"
+
+#: models.py:52
+msgid "enqueued at"
+msgstr "入队时间"
+
+#: models.py:53
+msgid "Time when task was enqueued"
+msgstr "任务入队的时间"
+
+#: models.py:58
+msgid "started at"
+msgstr "开始时间"
+
+#: models.py:59
+msgid "Execution start time"
+msgstr "执行开始时间"
+
+#: models.py:64
+msgid "finished at"
+msgstr "结束时间"
+
+#: models.py:65
+msgid "Execution end time"
+msgstr "执行结束时间"
+
+#: models.py:70
+msgid "last attempted at"
+msgstr "最后尝试时间"
+
+#: models.py:71
+msgid "Last attempt time"
+msgstr "最后一次尝试的时间"
+
+#: models.py:76
+msgid "return value"
+msgstr "返回值"
+
+#: models.py:77
+msgid "Return value (JSON format)"
+msgstr "返回值（JSON 格式）"
+
+#: models.py:81
+msgid "errors"
+msgstr "错误"
+
+#: models.py:82
+msgid "Error information (JSON format)"
+msgstr "错误信息（JSON 格式）"
+
+#: models.py:86
+msgid "worker IDs"
+msgstr "工作进程 ID"
+
+#: models.py:87
+msgid "List of worker IDs (JSON format)"
+msgstr "工作进程 ID 列表（JSON 格式）"
+
+#: models.py:91
+msgid "backend name"
+msgstr "后端名称"
+
+#: models.py:92
+msgid "Backend name"
+msgstr "后端名称"
+
+#: models.py:96
+msgid "created at"
+msgstr "创建时间"
+
+#: models.py:97
+msgid "Record creation time"
+msgstr "记录的创建时间"
+
+#: models.py:101
+msgid "updated at"
+msgstr "更新时间"
+
+#: models.py:102
+msgid "Record update time"
+msgstr "记录的更新时间"
+
+#: models.py:116
+msgid "database task"
+msgstr "数据库任务"
+
+#: models.py:117
+msgid "database tasks"
+msgstr "数据库任务"
