@@ -1,0 +1,353 @@
+# Brazilian Portuguese translations for django-database-task.
+# Copyright (C) 2025 Shinya Okano
+# This file is distributed under the same license as the django-database-task package.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: django-database-task 0.1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-09-30 04:39+0000\n"
+"PO-Revision-Date: 2026-09-30 00:00+0000\n"
+"Last-Translator: Shinya Okano <tokibito@gmail.com>\n"
+"Language-Team: Brazilian Portuguese\n"
+"Language: pt_BR\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#: admin.py:82
+msgid "ID"
+msgstr "ID"
+
+#: admin.py:91
+msgid "Task"
+msgstr "Tarefa"
+
+#: admin.py:109
+msgid "Status"
+msgstr "Status"
+
+#: admin.py:117
+msgid "Run selected tasks"
+msgstr "Executar tarefas selecionadas"
+
+#: admin.py:163
+msgid "Retry failed tasks"
+msgstr "Tentar novamente tarefas com falha"
+
+#: admin.py:217
+msgid "Requeue tasks stuck in running"
+msgstr "Reenfileirar tarefas presas em execução"
+
+#: management/commands/purge_completed_database_tasks.py:17
+msgid "Delete completed task records from the database"
+msgstr "Exclui do banco de dados os registros de tarefas concluídas"
+
+#: management/commands/purge_completed_database_tasks.py:24
+msgid "Delete tasks completed more than N days ago (0=all, default: 0)"
+msgstr "Exclui as tarefas concluídas há mais de N dias (0=todas, padrão: 0)"
+
+#: management/commands/purge_completed_database_tasks.py:30
+msgid "Target statuses, comma-separated (default: SUCCESSFUL,FAILED)"
+msgstr "Status alvo, separados por vírgula (padrão: SUCCESSFUL,FAILED)"
+
+#: management/commands/purge_completed_database_tasks.py:36
+msgid "Number of tasks to delete at once (default: 1000)"
+msgstr "Número de tarefas a excluir de uma vez (padrão: 1000)"
+
+#: management/commands/purge_completed_database_tasks.py:41
+msgid "Show count only without deleting"
+msgstr "Apenas mostra a contagem, sem excluir"
+
+#: management/commands/requeue_stale_database_tasks.py:54
+msgid ""
+"Recover tasks left in RUNNING status by a worker that was killed before it "
+"could write a result"
+msgstr ""
+"Recupera as tarefas deixadas no status RUNNING por um worker que foi "
+"encerrado antes de gravar o resultado"
+
+#: management/commands/requeue_stale_database_tasks.py:64
+msgid ""
+"Only touch tasks that have been RUNNING for longer than this, as a number "
+"and a unit: 90s, 15m, 2h, 1d. Required, and it must be longer than your "
+"longest running task - a task still running when its threshold passes is "
+"requeued and ends up running twice"
+msgstr ""
+"Afeta apenas as tarefas que estão em RUNNING há mais tempo do que isto, como "
+"um número e uma unidade: 90s, 15m, 2h, 1d. Obrigatório, e deve ser maior do "
+"que a sua tarefa mais demorada - uma tarefa ainda em execução quando o "
+"limite passa é reenfileirada e acaba sendo executada duas vezes"
+
+#: management/commands/requeue_stale_database_tasks.py:75
+msgid "Queue name to recover (all queues if not specified)"
+msgstr "Nome da fila a recuperar (todas as filas se não for informado)"
+
+#: management/commands/requeue_stale_database_tasks.py:81
+msgid "Backend name to recover (all backends if not specified)"
+msgstr "Nome do backend a recuperar (todos os backends se não for informado)"
+
+#: management/commands/requeue_stale_database_tasks.py:88
+#, python-format
+msgid ""
+"Mark a task FAILED instead of requeueing it once it has been handed to this "
+"many workers (0=no limit, default: %(max_attempts)s). Stops a task that "
+"kills its worker from being requeued forever"
+msgstr ""
+"Marca a tarefa como FAILED em vez de reenfileirá-la depois que ela tiver "
+"sido entregue a este número de workers (0=sem limite, padrão: "
+"%(max_attempts)s). Impede que uma tarefa que derruba o seu worker seja "
+"reenfileirada para sempre"
+
+#: management/commands/requeue_stale_database_tasks.py:99
+msgid ""
+"Mark every stale task FAILED instead of requeueing it. For tasks that are "
+"not safe to run twice"
+msgstr ""
+"Marca todas as tarefas paradas como FAILED em vez de reenfileirá-las. Para "
+"tarefas que não podem ser executadas duas vezes com segurança"
+
+#: management/commands/requeue_stale_database_tasks.py:107
+msgid ""
+"Tell the backend's broker about each requeued task. Needed when workers only "
+"receive from a broker, because the message for the killed attempt is already "
+"gone"
+msgstr ""
+"Avisa o broker do backend sobre cada tarefa reenfileirada. Necessário quando "
+"os workers só recebem do broker, porque a mensagem da tentativa interrompida "
+"já não existe"
+
+#: management/commands/requeue_stale_database_tasks.py:116
+msgid "Number of tasks to process at once (default: 1000)"
+msgstr "Número de tarefas a processar de uma vez (padrão: 1000)"
+
+#: management/commands/requeue_stale_database_tasks.py:121
+msgid "Show what would happen without changing anything"
+msgstr "Mostra o que aconteceria sem alterar nada"
+
+#: management/commands/run_database_tasks.py:53
+msgid "Execute tasks queued in the database"
+msgstr "Executa as tarefas enfileiradas no banco de dados"
+
+#: management/commands/run_database_tasks.py:60
+msgid "Queue name to process (all queues if not specified)"
+msgstr "Nome da fila a processar (todas as filas se não for informado)"
+
+#: management/commands/run_database_tasks.py:66
+msgid "Backend name (default: default)"
+msgstr "Nome do backend (padrão: default)"
+
+#: management/commands/run_database_tasks.py:71
+msgid "Continuous mode (keep polling even when no tasks)"
+msgstr "Modo contínuo (continua consultando mesmo sem tarefas)"
+
+#: management/commands/run_database_tasks.py:77
+msgid "Polling interval in seconds for continuous mode (default: 5)"
+msgstr "Intervalo de consulta em segundos no modo contínuo (padrão: 5)"
+
+#: management/commands/run_database_tasks.py:83
+msgid "Maximum number of tasks to process (0=unlimited, default: 0)"
+msgstr "Número máximo de tarefas a processar (0=ilimitado, padrão: 0)"
+
+#: management/commands/run_database_tasks.py:90
+msgid ""
+"Where to look for tasks: 'db' polls the database, 'broker' receives from the "
+"backend's broker, 'both' does the broker first and falls back to the "
+"database, and 'auto' (default) means 'both' when the backend has a broker to "
+"receive from and 'db' otherwise"
+msgstr ""
+"Onde procurar tarefas: 'db' consulta o banco de dados, 'broker' recebe do "
+"broker do backend, 'both' usa o broker primeiro e recorre ao banco de dados, "
+"e 'auto' (padrão) significa 'both' quando o backend tem um broker do qual "
+"receber e 'db' caso contrário"
+
+#: management/commands/run_database_tasks.py:102
+msgid ""
+"Seconds to wait for a broker message before looking again. Replaces --"
+"interval as the idle wait when receiving from a broker (default: 20)"
+msgstr ""
+"Segundos de espera por uma mensagem do broker antes de verificar novamente. "
+"Substitui --interval como espera ociosa ao receber de um broker (padrão: 20)"
+
+#: management/commands/run_database_tasks.py:112
+msgid "Maximum number of broker messages to receive at a time (default: 1)"
+msgstr "Número máximo de mensagens do broker a receber de uma vez (padrão: 1)"
+
+#: management/commands/run_database_tasks.py:120
+msgid ""
+"Maximum seconds to wait for the running task after receiving SIGTERM/SIGINT "
+"before forcing exit (0=wait indefinitely, default: 0)"
+msgstr ""
+"Tempo máximo, em segundos, de espera pela tarefa em execução após receber "
+"SIGTERM/SIGINT antes de forçar a saída (0=esperar indefinidamente, padrão: 0)"
+
+#: management/commands/run_database_tasks.py:129
+msgid ""
+"Do not install SIGTERM/SIGINT handlers; the process is terminated "
+"immediately, even while a task is running"
+msgstr ""
+"Não instala manipuladores de SIGTERM/SIGINT; o processo é encerrado "
+"imediatamente, mesmo com uma tarefa em execução"
+
+#: management/commands/run_database_tasks.py:139
+msgid ""
+"Exit with this code when no task was processed, so a job scheduler can tell "
+"an idle run from a real one (0=exit normally, default: 0)"
+msgstr ""
+"Sai com este código quando nenhuma tarefa foi processada, para que um "
+"agendador de jobs distinga uma execução ociosa de uma real (0=sair "
+"normalmente, padrão: 0)"
+
+#: management/commands/run_database_tasks.py:150
+msgid ""
+"Exit with this code when at least one task failed or could not be run. Takes "
+"precedence over --empty-exit-code (0=exit normally, default: 0)"
+msgstr ""
+"Sai com este código quando ao menos uma tarefa falhou ou não pôde ser "
+"executada. Tem precedência sobre --empty-exit-code (0=sair normalmente, "
+"padrão: 0)"
+
+#: models.py:14
+msgid "task path"
+msgstr "caminho da tarefa"
+
+#: models.py:15
+msgid "Module path of the task function"
+msgstr "Caminho do módulo da função da tarefa"
+
+#: models.py:20
+msgid "queue name"
+msgstr "nome da fila"
+
+#: models.py:21
+msgid "Queue name"
+msgstr "Nome da fila"
+
+#: models.py:25
+msgid "priority"
+msgstr "prioridade"
+
+#: models.py:26
+msgid "Priority (-100 to 100)"
+msgstr "Prioridade (-100 a 100)"
+
+#: models.py:30
+msgid "arguments"
+msgstr "argumentos"
+
+#: models.py:31
+msgid "Arguments (JSON format)"
+msgstr "Argumentos (formato JSON)"
+
+#: models.py:35
+msgid "keyword arguments"
+msgstr "argumentos nomeados"
+
+#: models.py:36
+msgid "Keyword arguments (JSON format)"
+msgstr "Argumentos nomeados (formato JSON)"
+
+#: models.py:42
+msgid "status"
+msgstr "status"
+
+#: models.py:43
+msgid "Task status"
+msgstr "Status da tarefa"
+
+#: models.py:48
+msgid "run after"
+msgstr "agendada para"
+
+#: models.py:49
+msgid "Earliest execution time"
+msgstr "Horário mais cedo de execução"
+
+#: models.py:52
+msgid "enqueued at"
+msgstr "enfileirada em"
+
+#: models.py:53
+msgid "Time when task was enqueued"
+msgstr "Horário em que a tarefa foi enfileirada"
+
+#: models.py:58
+msgid "started at"
+msgstr "iniciada em"
+
+#: models.py:59
+msgid "Execution start time"
+msgstr "Horário de início da execução"
+
+#: models.py:64
+msgid "finished at"
+msgstr "finalizada em"
+
+#: models.py:65
+msgid "Execution end time"
+msgstr "Horário de término da execução"
+
+#: models.py:70
+msgid "last attempted at"
+msgstr "última tentativa em"
+
+#: models.py:71
+msgid "Last attempt time"
+msgstr "Horário da última tentativa"
+
+#: models.py:76
+msgid "return value"
+msgstr "valor de retorno"
+
+#: models.py:77
+msgid "Return value (JSON format)"
+msgstr "Valor de retorno (formato JSON)"
+
+#: models.py:81
+msgid "errors"
+msgstr "erros"
+
+#: models.py:82
+msgid "Error information (JSON format)"
+msgstr "Informações de erro (formato JSON)"
+
+#: models.py:86
+msgid "worker IDs"
+msgstr "IDs dos workers"
+
+#: models.py:87
+msgid "List of worker IDs (JSON format)"
+msgstr "Lista de IDs dos workers (formato JSON)"
+
+#: models.py:91
+msgid "backend name"
+msgstr "nome do backend"
+
+#: models.py:92
+msgid "Backend name"
+msgstr "Nome do backend"
+
+#: models.py:96
+msgid "created at"
+msgstr "criada em"
+
+#: models.py:97
+msgid "Record creation time"
+msgstr "Horário de criação do registro"
+
+#: models.py:101
+msgid "updated at"
+msgstr "atualizada em"
+
+#: models.py:102
+msgid "Record update time"
+msgstr "Horário de atualização do registro"
+
+#: models.py:116
+msgid "database task"
+msgstr "tarefa do banco de dados"
+
+#: models.py:117
+msgid "database tasks"
+msgstr "tarefas do banco de dados"

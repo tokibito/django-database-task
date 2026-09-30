@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+
+- **Simplified Chinese, Brazilian Portuguese and Spanish translations.** The
+  admin and the help of the management commands are now translated under a
+  `zh-hans`, `pt-br` or `es` locale, as they already were under a Japanese
+  one. The terms follow the django-tasks-redis catalogues, so the two
+  packages read the same under each locale.
+  ([#33](https://github.com/tokibito/django-database-task/issues/33))
+
 ### Fixed
 
 - A task could run twice when more than one worker polled the same queue.
