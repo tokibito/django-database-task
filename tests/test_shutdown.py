@@ -52,7 +52,9 @@ class TestGracefulShutdownState:
         elapsed = time.monotonic() - started
 
         assert result is False
-        assert elapsed >= 0.1
+        # Windows can measure the wait one clock interrupt (~15.6ms) short of
+        # the timeout; what is under test is that it blocked, not exactness.
+        assert elapsed >= 0.08
 
     def test_wait_returns_immediately_after_request(self):
         """wait() does not sleep once a shutdown is requested."""
