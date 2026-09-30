@@ -1,13 +1,15 @@
 """Tests for HTTP endpoint views."""
 
 import json
+from datetime import timedelta
 
 import pytest
 from django.http import JsonResponse
 from django.tasks.base import TaskResultStatus
-from django.test import Client
+from django.test import Client, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from django_database_task.backends import DatabaseTaskBackend
 from django_database_task.models import DatabaseTask
@@ -261,6 +263,98 @@ class TestTaskStatusView:
         """Test that POST method is not allowed."""
         response = client.post(reverse("django_database_task:task_status"))
         assert response.status_code == 405
+
+    def test_task_status_returns_the_queue_stats(self, client):
+        """The response carries get_queue_stats() alongside pending_count."""
+        now = timezone.now()
+        for status, enqueued_at, run_after in [
+            (TaskResultStatus.READY, now - timedelta(minutes=30), None),
+            (TaskResultStatus.READY, now - timedelta(minutes=10), None),
+            (TaskResultStatus.READY, now, now + timedelta(hours=1)),
+            (TaskResultStatus.RUNNING, now, None),
+            (TaskResultStatus.SUCCESSFUL, now, None),
+            (TaskResultStatus.FAILED, now, None),
+        ]:
+            DatabaseTask.objects.create(
+                task_path="tests.test_executor.sample_task",
+                status=status,
+                enqueued_at=enqueued_at,
+                run_after=run_after,
+                backend_name="default",
+            )
+
+        response = client.get(reverse("django_database_task:task_status"))
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data == {
+            "pending_count": 2,
+            "running_count": 1,
+            "successful_count": 1,
+            "failed_count": 1,
+            "delayed_count": 1,
+            "oldest_pending_waiting_since": data["oldest_pending_waiting_since"],
+            "newest_pending_waiting_since": data["newest_pending_waiting_since"],
+        }
+        # Serialized as ISO 8601 by DjangoJSONEncoder, to the millisecond.
+        oldest = parse_datetime(data["oldest_pending_waiting_since"])
+        newest = parse_datetime(data["newest_pending_waiting_since"])
+        assert abs(oldest - (now - timedelta(minutes=30))) < timedelta(seconds=1)
+        assert abs(newest - (now - timedelta(minutes=10))) < timedelta(seconds=1)
+
+    def test_task_status_of_an_empty_queue(self, client):
+        response = client.get(reverse("django_database_task:task_status"))
+
+        data = response.json()
+        assert data["pending_count"] == 0
+        assert data["oldest_pending_waiting_since"] is None
+        assert data["newest_pending_waiting_since"] is None
+
+    def test_task_status_filters_the_stats_by_queue(self, client):
+        for queue_name, status in [
+            ("emails", TaskResultStatus.FAILED),
+            ("default", TaskResultStatus.FAILED),
+            ("default", TaskResultStatus.FAILED),
+        ]:
+            DatabaseTask.objects.create(
+                task_path="tests.test_executor.sample_task",
+                queue_name=queue_name,
+                status=status,
+                enqueued_at=timezone.now(),
+                backend_name="default",
+            )
+
+        response = client.get(
+            reverse("django_database_task:task_status"),
+            {"queue_name": "emails"},
+        )
+
+        assert response.json()["failed_count"] == 1
+
+    def test_task_status_of_a_backend_without_queue_stats(self, client):
+        """A backend other than a database one still gets pending_count."""
+        DatabaseTask.objects.create(
+            task_path="tests.test_executor.sample_task",
+            status=TaskResultStatus.READY,
+            enqueued_at=timezone.now(),
+            backend_name="dummy",
+        )
+
+        with override_settings(
+            TASKS={
+                "default": {
+                    "BACKEND": "django_database_task.backends.DatabaseTaskBackend"
+                },
+                "dummy": {"BACKEND": "django.tasks.backends.dummy.DummyBackend"},
+            }
+        ):
+            response = client.get(
+                reverse("django_database_task:task_status"),
+                {"backend_name": "dummy"},
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"pending_count": 1}
 
 
 @pytest.mark.django_db

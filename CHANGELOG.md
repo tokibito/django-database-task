@@ -4,6 +4,24 @@
 
 ### Added
 
+- **A monitoring API: status counts and queue age.** `get_queue_stats()`
+  returns the counts per status (`pending_count`, `running_count`,
+  `successful_count`, `failed_count`), the number of delayed tasks not yet
+  due (`delayed_count`), and the time the oldest and newest pending task
+  started waiting (`oldest_pending_waiting_since`,
+  `newest_pending_waiting_since`), which is `max(enqueued_at, run_after)`, so
+  a task scheduled for later does not read as queue age. `get_task_counts()`
+  returns the counts per status alone. Both take `queue_name` and
+  `backend_name`, are read in one aggregate query, and call the new
+  `get_queue_stats()` and `get_status_counts()` methods of the backend, which
+  a subclass can override. The keys are those of django-tasks-redis, so a
+  collector written for one reads the other; `pending_count` keeps the
+  meaning of `get_pending_task_count()`, leaving out the tasks counted in
+  `delayed_count`. The README's new *Monitoring* section points at these for
+  queue state and at the `task_finished` signal for task duration. Existing
+  projects need no changes.
+  ([#34](https://github.com/tokibito/django-database-task/issues/34))
+
 - **Purging one task's results.** `purge_completed_database_tasks` takes
   `--task-path`, and `/tasks/purge/` takes `task_path` as a query parameter
   and as a JSON field, to delete only the results of the task with that path,
@@ -23,6 +41,17 @@
   backend, each listing the distinct values of the stored tasks. Existing
   projects need no changes.
   ([#29](https://github.com/tokibito/django-database-task/issues/29))
+
+### Changed
+
+- **`GET /tasks/status/` returns the queue stats.** The response carries the
+  keys of `get_queue_stats()` alongside `pending_count`, with the waiting
+  times in ISO 8601 (`null` when no task is pending). `pending_count` is the
+  same number as before, so a health check reading it is unaffected, and a
+  backend that is not a database backend still returns `pending_count` alone.
+  The endpoint's authentication is unchanged. Existing projects need no
+  changes.
+  ([#34](https://github.com/tokibito/django-database-task/issues/34))
 
 ### Fixed
 

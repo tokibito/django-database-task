@@ -7,6 +7,8 @@ __version__ = "0.5.0"
 _EXECUTOR_EXPORTS = (
     "fetch_task",
     "get_pending_task_count",
+    "get_queue_stats",
+    "get_task_counts",
     "process_one_task",
     "process_tasks",
     "requeue_stale_tasks",
@@ -38,6 +40,8 @@ __all__ = [
     "fetch_task",
     "get_active_shutdown",
     "get_pending_task_count",
+    "get_queue_stats",
+    "get_task_counts",
     "is_shutdown_requested",
     "process_one_task",
     "process_tasks",

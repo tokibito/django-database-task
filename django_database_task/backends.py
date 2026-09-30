@@ -9,6 +9,8 @@ from inspect import iscoroutinefunction
 
 from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
+from django.db.models import Count, Max, Min, Q
+from django.db.models.functions import Coalesce, Greatest
 from django.tasks.backends.base import BaseTaskBackend
 from django.tasks.base import Task, TaskContext, TaskError, TaskResult, TaskResultStatus
 from django.tasks.exceptions import TaskResultDoesNotExist
@@ -266,6 +268,77 @@ class DatabaseTaskBackend(BaseTaskBackend):
 
         task = self._resolve_task(db_task.task_path)
         return self._db_task_to_result(db_task, task)
+
+    def _stored_tasks(self, queue_name=None):
+        """The stored tasks of this backend, optionally of one queue."""
+        from .models import DatabaseTask
+
+        queryset = DatabaseTask.objects.filter(backend_name=self.alias)
+        if queue_name:
+            queryset = queryset.filter(queue_name=queue_name)
+        return queryset
+
+    def get_status_counts(self, queue_name=None):
+        """
+        Get task counts by status.
+
+        Args:
+            queue_name: Optional queue name filter.
+
+        Returns:
+            Dict mapping each status to the number of tasks in it. READY
+            includes the delayed tasks whose ``run_after`` has not come.
+        """
+        return self._stored_tasks(queue_name).aggregate(
+            **{
+                status.value: Count("pk", filter=Q(status=status))
+                for status in TaskResultStatus
+            }
+        )
+
+    def get_queue_stats(self, queue_name=None):
+        """
+        Get queue statistics for a dashboard or an alert.
+
+        The same keys as the ``get_queue_stats()`` of django-tasks-redis, read
+        in one aggregate query.
+
+        Args:
+            queue_name: Optional queue name filter.
+
+        Returns:
+            Dict with the counts per status (``pending_count``,
+            ``running_count``, ``successful_count``, ``failed_count``), the
+            number of delayed tasks not yet due (``delayed_count``), and the
+            time the oldest and newest pending task started waiting
+            (``oldest_pending_waiting_since``, ``newest_pending_waiting_since``):
+            ``max(enqueued_at, run_after)``, None when there is none.
+
+            A pending task is one a worker would pick up now: a READY task
+            whose ``run_after`` is unset or has passed, as counted by
+            ``get_pending_task_count()``. A READY task whose ``run_after``
+            lies in the future is counted in ``delayed_count`` instead, so
+            the two add up to the READY count of :meth:`get_status_counts`.
+        """
+        now = timezone.now()
+        due = Q(run_after__isnull=True) | Q(run_after__lte=now)
+        pending = Q(status=TaskResultStatus.READY) & due
+        # A task delayed with run_after starts waiting when it becomes due,
+        # not when it was enqueued.
+        waiting_since = Greatest("enqueued_at", Coalesce("run_after", "enqueued_at"))
+
+        return self._stored_tasks(queue_name).aggregate(
+            pending_count=Count("pk", filter=pending),
+            running_count=Count("pk", filter=Q(status=TaskResultStatus.RUNNING)),
+            successful_count=Count("pk", filter=Q(status=TaskResultStatus.SUCCESSFUL)),
+            failed_count=Count("pk", filter=Q(status=TaskResultStatus.FAILED)),
+            delayed_count=Count(
+                "pk",
+                filter=Q(status=TaskResultStatus.READY, run_after__gt=now),
+            ),
+            oldest_pending_waiting_since=Min(waiting_since, filter=pending),
+            newest_pending_waiting_since=Max(waiting_since, filter=pending),
+        )
 
     def _get_task_path(self, task):
         """Get the module path of the task function."""
