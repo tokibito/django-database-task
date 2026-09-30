@@ -4,6 +4,14 @@
 
 ### Added
 
+- **Purging one task's results.** `purge_completed_database_tasks` takes
+  `--task-path`, and `/tasks/purge/` takes `task_path` as a query parameter
+  and as a JSON field, to delete only the results of the task with that path,
+  matched exactly. A deployment that keeps results for a long time can clear
+  a noisy task, such as a heartbeat enqueued every minute, early. It combines
+  with `--days` and `--status`; without it every task path is purged, as
+  before. Existing projects need no changes.
+  ([#30](https://github.com/tokibito/django-database-task/issues/30))
 - **Simplified Chinese, Brazilian Portuguese and Spanish translations.** The
   admin and the help of the management commands are now translated under a
   `zh-hans`, `pt-br` or `es` locale, as they already were under a Japanese

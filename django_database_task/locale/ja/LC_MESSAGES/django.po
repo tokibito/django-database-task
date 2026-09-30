@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-database-task 0.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-29 23:15+0900\n"
+"POT-Creation-Date: 2026-09-30 05:44+0000\n"
 "PO-Revision-Date: 2025-12-27 00:00+0000\n"
 "Last-Translator: Shinya Okano <tokibito@gmail.com>\n"
 "Language-Team: Japanese\n"
@@ -17,307 +17,338 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: django_database_task/admin.py:82
+#: admin.py:82
 msgid "ID"
 msgstr "ID"
 
-#: django_database_task/admin.py:91
+#: admin.py:91
 msgid "Task"
 msgstr "タスク"
 
-#: django_database_task/admin.py:109
+#: admin.py:109
 msgid "Status"
 msgstr "ステータス"
 
-#: django_database_task/admin.py:117
+#: admin.py:117
 msgid "Run selected tasks"
 msgstr "選択したタスクを実行"
 
-#: django_database_task/admin.py:160
+#: admin.py:163
 msgid "Retry failed tasks"
 msgstr "失敗したタスクを再実行"
 
-#: django_database_task/admin.py:214
+#: admin.py:217
 msgid "Requeue tasks stuck in running"
 msgstr "実行中のまま残ったタスクをキューに戻す"
 
-#: django_database_task/management/commands/purge_completed_database_tasks.py:17
+#: management/commands/purge_completed_database_tasks.py:17
 msgid "Delete completed task records from the database"
 msgstr "完了したタスクのレコードをデータベースから削除"
 
-#: django_database_task/management/commands/purge_completed_database_tasks.py:24
+#: management/commands/purge_completed_database_tasks.py:24
 msgid "Delete tasks completed more than N days ago (0=all, default: 0)"
 msgstr "N日以上前に完了したタスクを削除 (0=すべて、デフォルト: 0)"
 
-#: django_database_task/management/commands/purge_completed_database_tasks.py:30
+#: management/commands/purge_completed_database_tasks.py:30
 msgid "Target statuses, comma-separated (default: SUCCESSFUL,FAILED)"
 msgstr "対象のステータス、カンマ区切り (デフォルト: SUCCESSFUL,FAILED)"
 
-#: django_database_task/management/commands/purge_completed_database_tasks.py:36
+#: management/commands/purge_completed_database_tasks.py:35
+msgid "Only delete tasks with this task path (default: all tasks)"
+msgstr "このタスクパスのタスクのみを削除 (デフォルト: すべてのタスク)"
+
+#: management/commands/purge_completed_database_tasks.py:41
 msgid "Number of tasks to delete at once (default: 1000)"
 msgstr "一度に削除するタスク数 (デフォルト: 1000)"
 
-#: django_database_task/management/commands/purge_completed_database_tasks.py:41
+#: management/commands/purge_completed_database_tasks.py:46
 msgid "Show count only without deleting"
 msgstr "削除せずに件数のみ表示"
 
-#: django_database_task/management/commands/requeue_stale_database_tasks.py:54
+#: management/commands/requeue_stale_database_tasks.py:54
 msgid ""
 "Recover tasks left in RUNNING status by a worker that was killed before it "
 "could write a result"
-msgstr "結果を書き込む前に強制終了されたワーカーによってRUNNINGのまま残ったタスクを回復"
+msgstr ""
+"結果を書き込む前に強制終了されたワーカーによってRUNNINGのまま残ったタスクを回"
+"復"
 
-#: django_database_task/management/commands/requeue_stale_database_tasks.py:64
+#: management/commands/requeue_stale_database_tasks.py:64
 msgid ""
 "Only touch tasks that have been RUNNING for longer than this, as a number "
 "and a unit: 90s, 15m, 2h, 1d. Required, and it must be longer than your "
 "longest running task - a task still running when its threshold passes is "
 "requeued and ends up running twice"
-msgstr "これより長くRUNNINGのままのタスクのみを対象にする。数値と単位で指定する: 90s、15m、2h、1d。必須で、最も長く実行されるタスクより長くすること。この時間を過ぎてもまだ実行中のタスクはキューに戻され、二重に実行される"
+msgstr ""
+"これより長くRUNNINGのままのタスクのみを対象にする。数値と単位で指定する: "
+"90s、15m、2h、1d。必須で、最も長く実行されるタスクより長くすること。この時間"
+"を過ぎてもまだ実行中のタスクはキューに戻され、二重に実行される"
 
-#: django_database_task/management/commands/requeue_stale_database_tasks.py:75
+#: management/commands/requeue_stale_database_tasks.py:75
 msgid "Queue name to recover (all queues if not specified)"
 msgstr "回復するキュー名 (指定しない場合はすべてのキュー)"
 
-#: django_database_task/management/commands/requeue_stale_database_tasks.py:81
+#: management/commands/requeue_stale_database_tasks.py:81
 msgid "Backend name to recover (all backends if not specified)"
 msgstr "回復するバックエンド名 (指定しない場合はすべてのバックエンド)"
 
-#: django_database_task/management/commands/requeue_stale_database_tasks.py:88
+#: management/commands/requeue_stale_database_tasks.py:88
 #, python-format
 msgid ""
 "Mark a task FAILED instead of requeueing it once it has been handed to this "
 "many workers (0=no limit, default: %(max_attempts)s). Stops a task that "
 "kills its worker from being requeued forever"
-msgstr "この数のワーカーに渡されたタスクは、キューに戻さずFAILEDにする (0=無制限、デフォルト: %(max_attempts)s)。ワーカーを強制終了させるタスクが際限なくキューに戻されるのを防ぐ"
+msgstr ""
+"この数のワーカーに渡されたタスクは、キューに戻さずFAILEDにする (0=無制限、デ"
+"フォルト: %(max_attempts)s)。ワーカーを強制終了させるタスクが際限なくキューに"
+"戻されるのを防ぐ"
 
-#: django_database_task/management/commands/requeue_stale_database_tasks.py:99
+#: management/commands/requeue_stale_database_tasks.py:99
 msgid ""
 "Mark every stale task FAILED instead of requeueing it. For tasks that are "
 "not safe to run twice"
-msgstr "残ったタスクをすべて、キューに戻さずFAILEDにする。二重に実行すると安全でないタスク向け"
+msgstr ""
+"残ったタスクをすべて、キューに戻さずFAILEDにする。二重に実行すると安全でない"
+"タスク向け"
 
-#: django_database_task/management/commands/requeue_stale_database_tasks.py:107
+#: management/commands/requeue_stale_database_tasks.py:107
 msgid ""
 "Tell the backend's broker about each requeued task. Needed when workers only "
 "receive from a broker, because the message for the killed attempt is already "
 "gone"
-msgstr "キューに戻した各タスクをバックエンドのブローカーに通知する。ワーカーがブローカーからのみ受信する場合に必要 (強制終了された試行のメッセージはすでに消えているため)"
+msgstr ""
+"キューに戻した各タスクをバックエンドのブローカーに通知する。ワーカーがブロー"
+"カーからのみ受信する場合に必要 (強制終了された試行のメッセージはすでに消えて"
+"いるため)"
 
-#: django_database_task/management/commands/requeue_stale_database_tasks.py:116
+#: management/commands/requeue_stale_database_tasks.py:116
 msgid "Number of tasks to process at once (default: 1000)"
 msgstr "一度に処理するタスク数 (デフォルト: 1000)"
 
-#: django_database_task/management/commands/requeue_stale_database_tasks.py:121
+#: management/commands/requeue_stale_database_tasks.py:121
 msgid "Show what would happen without changing anything"
 msgstr "何も変更せずに、何が行われるかを表示"
 
-#: django_database_task/management/commands/run_database_tasks.py:53
+#: management/commands/run_database_tasks.py:53
 msgid "Execute tasks queued in the database"
 msgstr "データベースのキューに登録されたタスクを実行"
 
-#: django_database_task/management/commands/run_database_tasks.py:60
+#: management/commands/run_database_tasks.py:60
 msgid "Queue name to process (all queues if not specified)"
 msgstr "処理するキュー名 (指定しない場合はすべてのキュー)"
 
-#: django_database_task/management/commands/run_database_tasks.py:66
+#: management/commands/run_database_tasks.py:66
 msgid "Backend name (default: default)"
 msgstr "バックエンド名 (デフォルト: default)"
 
-#: django_database_task/management/commands/run_database_tasks.py:71
+#: management/commands/run_database_tasks.py:71
 msgid "Continuous mode (keep polling even when no tasks)"
 msgstr "継続モード (タスクがなくてもポーリングを続ける)"
 
-#: django_database_task/management/commands/run_database_tasks.py:77
+#: management/commands/run_database_tasks.py:77
 msgid "Polling interval in seconds for continuous mode (default: 5)"
 msgstr "継続モードのポーリング間隔（秒）(デフォルト: 5)"
 
-#: django_database_task/management/commands/run_database_tasks.py:83
+#: management/commands/run_database_tasks.py:83
 msgid "Maximum number of tasks to process (0=unlimited, default: 0)"
 msgstr "処理する最大タスク数 (0=無制限、デフォルト: 0)"
 
-#: django_database_task/management/commands/run_database_tasks.py:90
+#: management/commands/run_database_tasks.py:90
 msgid ""
 "Where to look for tasks: 'db' polls the database, 'broker' receives from the "
 "backend's broker, 'both' does the broker first and falls back to the "
 "database, and 'auto' (default) means 'both' when the backend has a broker to "
 "receive from and 'db' otherwise"
-msgstr "タスクの取得元: 'db' はデータベースをポーリングし、'broker' はバックエンドのブローカーから受信し、'both' はブローカーを先に見てからデータベースにフォールバックする。'auto' (デフォルト) は、受信できるブローカーがバックエンドにあれば 'both'、なければ 'db' になる"
+msgstr ""
+"タスクの取得元: 'db' はデータベースをポーリングし、'broker' はバックエンドの"
+"ブローカーから受信し、'both' はブローカーを先に見てからデータベースにフォール"
+"バックする。'auto' (デフォルト) は、受信できるブローカーがバックエンドにあれ"
+"ば 'both'、なければ 'db' になる"
 
-#: django_database_task/management/commands/run_database_tasks.py:102
+#: management/commands/run_database_tasks.py:102
 msgid ""
 "Seconds to wait for a broker message before looking again. Replaces --"
 "interval as the idle wait when receiving from a broker (default: 20)"
-msgstr "再確認するまでブローカーのメッセージを待つ秒数。ブローカーから受信する場合、アイドル時の待機として --interval の代わりに使われる (デフォルト: 20)"
+msgstr ""
+"再確認するまでブローカーのメッセージを待つ秒数。ブローカーから受信する場合、"
+"アイドル時の待機として --interval の代わりに使われる (デフォルト: 20)"
 
-#: django_database_task/management/commands/run_database_tasks.py:112
+#: management/commands/run_database_tasks.py:112
 msgid "Maximum number of broker messages to receive at a time (default: 1)"
 msgstr "一度に受信するブローカーメッセージの最大数 (デフォルト: 1)"
 
-#: django_database_task/management/commands/run_database_tasks.py:120
+#: management/commands/run_database_tasks.py:120
 msgid ""
 "Maximum seconds to wait for the running task after receiving SIGTERM/SIGINT "
 "before forcing exit (0=wait indefinitely, default: 0)"
-msgstr "SIGTERM/SIGINTを受信してから強制終了するまで、実行中のタスクを待つ最大秒数 (0=無期限に待つ、デフォルト: 0)"
+msgstr ""
+"SIGTERM/SIGINTを受信してから強制終了するまで、実行中のタスクを待つ最大秒数 "
+"(0=無期限に待つ、デフォルト: 0)"
 
-#: django_database_task/management/commands/run_database_tasks.py:129
+#: management/commands/run_database_tasks.py:129
 msgid ""
 "Do not install SIGTERM/SIGINT handlers; the process is terminated "
 "immediately, even while a task is running"
-msgstr "SIGTERM/SIGINTハンドラーを設定しない。タスクの実行中でもプロセスは即座に終了する"
+msgstr ""
+"SIGTERM/SIGINTハンドラーを設定しない。タスクの実行中でもプロセスは即座に終了"
+"する"
 
-#: django_database_task/management/commands/run_database_tasks.py:139
+#: management/commands/run_database_tasks.py:139
 msgid ""
 "Exit with this code when no task was processed, so a job scheduler can tell "
 "an idle run from a real one (0=exit normally, default: 0)"
-msgstr "タスクを1件も処理しなかった場合にこの終了コードで終了する。ジョブスケジューラーが空振りの実行を区別できるようにする (0=通常どおり終了、デフォルト: 0)"
+msgstr ""
+"タスクを1件も処理しなかった場合にこの終了コードで終了する。ジョブスケジュー"
+"ラーが空振りの実行を区別できるようにする (0=通常どおり終了、デフォルト: 0)"
 
-#: django_database_task/management/commands/run_database_tasks.py:150
+#: management/commands/run_database_tasks.py:150
 msgid ""
 "Exit with this code when at least one task failed or could not be run. Takes "
 "precedence over --empty-exit-code (0=exit normally, default: 0)"
-msgstr "1件以上のタスクが失敗した、または実行できなかった場合にこの終了コードで終了する。--empty-exit-codeより優先される (0=通常どおり終了、デフォルト: 0)"
+msgstr ""
+"1件以上のタスクが失敗した、または実行できなかった場合にこの終了コードで終了す"
+"る。--empty-exit-codeより優先される (0=通常どおり終了、デフォルト: 0)"
 
-#: django_database_task/models.py:14
+#: models.py:14
 msgid "task path"
 msgstr "タスクパス"
 
-#: django_database_task/models.py:15
+#: models.py:15
 msgid "Module path of the task function"
 msgstr "タスク関数のモジュールパス"
 
-#: django_database_task/models.py:20
+#: models.py:20
 msgid "queue name"
 msgstr "キュー名"
 
-#: django_database_task/models.py:21
+#: models.py:21
 msgid "Queue name"
 msgstr "キュー名"
 
-#: django_database_task/models.py:25
+#: models.py:25
 msgid "priority"
 msgstr "優先度"
 
-#: django_database_task/models.py:26
+#: models.py:26
 msgid "Priority (-100 to 100)"
 msgstr "優先度 (-100 から 100)"
 
-#: django_database_task/models.py:30
+#: models.py:30
 msgid "arguments"
 msgstr "引数"
 
-#: django_database_task/models.py:31
+#: models.py:31
 msgid "Arguments (JSON format)"
 msgstr "引数 (JSON形式)"
 
-#: django_database_task/models.py:35
+#: models.py:35
 msgid "keyword arguments"
 msgstr "キーワード引数"
 
-#: django_database_task/models.py:36
+#: models.py:36
 msgid "Keyword arguments (JSON format)"
 msgstr "キーワード引数 (JSON形式)"
 
-#: django_database_task/models.py:42
+#: models.py:42
 msgid "status"
 msgstr "ステータス"
 
-#: django_database_task/models.py:43
+#: models.py:43
 msgid "Task status"
 msgstr "タスクのステータス"
 
-#: django_database_task/models.py:48
+#: models.py:48
 msgid "run after"
 msgstr "実行開始日時"
 
-#: django_database_task/models.py:49
+#: models.py:49
 msgid "Earliest execution time"
 msgstr "最も早い実行日時"
 
-#: django_database_task/models.py:52
+#: models.py:52
 msgid "enqueued at"
 msgstr "キュー登録日時"
 
-#: django_database_task/models.py:53
+#: models.py:53
 msgid "Time when task was enqueued"
 msgstr "タスクがキューに登録された日時"
 
-#: django_database_task/models.py:58
+#: models.py:58
 msgid "started at"
 msgstr "開始日時"
 
-#: django_database_task/models.py:59
+#: models.py:59
 msgid "Execution start time"
 msgstr "実行開始日時"
 
-#: django_database_task/models.py:64
+#: models.py:64
 msgid "finished at"
 msgstr "終了日時"
 
-#: django_database_task/models.py:65
+#: models.py:65
 msgid "Execution end time"
 msgstr "実行終了日時"
 
-#: django_database_task/models.py:70
+#: models.py:70
 msgid "last attempted at"
 msgstr "最終試行日時"
 
-#: django_database_task/models.py:71
+#: models.py:71
 msgid "Last attempt time"
 msgstr "最終試行日時"
 
-#: django_database_task/models.py:76
+#: models.py:76
 msgid "return value"
 msgstr "戻り値"
 
-#: django_database_task/models.py:77
+#: models.py:77
 msgid "Return value (JSON format)"
 msgstr "戻り値 (JSON形式)"
 
-#: django_database_task/models.py:81
+#: models.py:81
 msgid "errors"
 msgstr "エラー"
 
-#: django_database_task/models.py:82
+#: models.py:82
 msgid "Error information (JSON format)"
 msgstr "エラー情報 (JSON形式)"
 
-#: django_database_task/models.py:86
+#: models.py:86
 msgid "worker IDs"
 msgstr "ワーカーID"
 
-#: django_database_task/models.py:87
+#: models.py:87
 msgid "List of worker IDs (JSON format)"
 msgstr "ワーカーIDのリスト (JSON形式)"
 
-#: django_database_task/models.py:91
+#: models.py:91
 msgid "backend name"
 msgstr "バックエンド名"
 
-#: django_database_task/models.py:92
+#: models.py:92
 msgid "Backend name"
 msgstr "バックエンド名"
 
-#: django_database_task/models.py:96
+#: models.py:96
 msgid "created at"
 msgstr "作成日時"
 
-#: django_database_task/models.py:97
+#: models.py:97
 msgid "Record creation time"
 msgstr "レコード作成日時"
 
-#: django_database_task/models.py:101
+#: models.py:101
 msgid "updated at"
 msgstr "更新日時"
 
-#: django_database_task/models.py:102
+#: models.py:102
 msgid "Record update time"
 msgstr "レコード更新日時"
 
-#: django_database_task/models.py:116
+#: models.py:116
 msgid "database task"
 msgstr "データベースタスク"
 
-#: django_database_task/models.py:117
+#: models.py:117
 msgid "database tasks"
 msgstr "データベースタスク"

@@ -326,6 +326,7 @@ python manage.py purge_completed_database_tasks [options]
 |--------|-------------|
 | `--days` | Delete tasks completed more than N days ago (0=all) |
 | `--status` | Target statuses, comma-separated (default: "SUCCESSFUL,FAILED") |
+| `--task-path` | Only delete tasks with this task path, matched exactly (default: all tasks) |
 | `--batch-size` | Number of tasks to delete at once (default: 1000) |
 | `--dry-run` | Show count only without deleting |
 
@@ -1084,6 +1085,7 @@ Delete completed tasks from the database. Useful for cron-based cleanup.
 |-----------|------|---------|-------------|
 | `days` | int | 0 | Delete tasks completed more than N days ago (0=all) |
 | `status` | string | "SUCCESSFUL,FAILED" | Target statuses, comma-separated |
+| `task_path` | string | (all tasks) | Only delete tasks with this task path, matched exactly |
 | `batch_size` | int | 1000 | Number of tasks to delete at once (max: 10000) |
 | `dry_run` | bool | false | If true, return count without deleting |
 
@@ -1093,6 +1095,7 @@ Delete completed tasks from the database. Useful for cron-based cleanup.
 |-----------|------|---------|-------------|
 | `days` | int | 0 | Delete tasks completed more than N days ago (0=all) |
 | `status` | string | "SUCCESSFUL,FAILED" | Target statuses, comma-separated |
+| `task_path` | string | (all tasks) | Only delete tasks with this task path, matched exactly |
 | `batch_size` | int | 1000 | Number of tasks to delete at once (max: 10000) |
 | `dry_run` | string | "false" | If "true", return count without deleting |
 
@@ -1137,6 +1140,9 @@ curl -X POST http://localhost:8000/tasks/purge/ \
 
 # Dry run via GET
 curl "http://localhost:8000/tasks/purge/?days=30&dry_run=true"
+
+# Delete one task's results only, however recent (GET - for GAE cron)
+curl "http://localhost:8000/tasks/purge/?task_path=myapp.tasks.heartbeat"
 ```
 
 ### Use Cases

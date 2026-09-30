@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-database-task 0.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-30 04:39+0000\n"
+"POT-Creation-Date: 2026-09-30 05:44+0000\n"
 "PO-Revision-Date: 2026-09-30 00:00+0000\n"
 "Last-Translator: Shinya Okano <tokibito@gmail.com>\n"
 "Language-Team: Brazilian Portuguese\n"
@@ -52,11 +52,15 @@ msgstr "Exclui as tarefas concluídas há mais de N dias (0=todas, padrão: 0)"
 msgid "Target statuses, comma-separated (default: SUCCESSFUL,FAILED)"
 msgstr "Status alvo, separados por vírgula (padrão: SUCCESSFUL,FAILED)"
 
-#: management/commands/purge_completed_database_tasks.py:36
+#: management/commands/purge_completed_database_tasks.py:35
+msgid "Only delete tasks with this task path (default: all tasks)"
+msgstr "Exclui apenas as tarefas com este caminho de tarefa (padrão: todas as tarefas)"
+
+#: management/commands/purge_completed_database_tasks.py:41
 msgid "Number of tasks to delete at once (default: 1000)"
 msgstr "Número de tarefas a excluir de uma vez (padrão: 1000)"
 
-#: management/commands/purge_completed_database_tasks.py:41
+#: management/commands/purge_completed_database_tasks.py:46
 msgid "Show count only without deleting"
 msgstr "Apenas mostra a contagem, sem excluir"
 
