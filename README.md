@@ -702,6 +702,12 @@ tasks at once, run more of them: every worker claims its own tasks with
 `SELECT FOR UPDATE SKIP LOCKED`, so workers on one host or on many never run
 the same task. There are three tiers, and they combine.
 
+**Prefer processes.** Unless memory is the constraint, run more processes,
+whether a process manager or `--workers` keeps them running: a process asks
+nothing of the task code and contains whatever goes wrong in a task. Reach
+for `--threads` only when the memory of N processes is what you cannot
+afford and the tasks are I/O-bound and thread-safe.
+
 | | Unit of parallelism | Reach for it when |
 |---|---|---|
 | A process manager | Processes, kept running by systemd template units, Kubernetes replicas, supervisord `numprocs` | You have one. It restarts, logs and health-checks the workers, and the command's default (one process, with the signals and exit codes described above) is what it expects |
@@ -866,7 +872,8 @@ open, and where `--threads M` stands against it:
   and the CPU scaling above for memory: M tasks in progress for one
   process's footprint, as long as the tasks are I/O-bound and thread-safe.
   It does not reduce database connections, and one bad task can take the
-  whole worker down. When memory is not the constraint, prefer processes.
+  whole worker down. That is why the advice at the top of this section is
+  to prefer processes when memory is not the constraint.
 
 ## Running from a job scheduler
 
