@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-database-task 0.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-30 17:27+0000\n"
+"POT-Creation-Date: 2026-10-02 05:07+0000\n"
 "PO-Revision-Date: 2026-09-30 00:00+0000\n"
 "Last-Translator: Shinya Okano <tokibito@gmail.com>\n"
 "Language-Team: Brazilian Portuguese\n"
@@ -132,31 +132,31 @@ msgstr "Número de tarefas a processar de uma vez (padrão: 1000)"
 msgid "Show what would happen without changing anything"
 msgstr "Mostra o que aconteceria sem alterar nada"
 
-#: management/commands/run_database_tasks.py:55
+#: management/commands/run_database_tasks.py:63
 msgid "Execute tasks queued in the database"
 msgstr "Executa as tarefas enfileiradas no banco de dados"
 
-#: management/commands/run_database_tasks.py:62
+#: management/commands/run_database_tasks.py:70
 msgid "Queue name to process (all queues if not specified)"
 msgstr "Nome da fila a processar (todas as filas se não for informado)"
 
-#: management/commands/run_database_tasks.py:68
+#: management/commands/run_database_tasks.py:76
 msgid "Backend name (default: default)"
 msgstr "Nome do backend (padrão: default)"
 
-#: management/commands/run_database_tasks.py:73
+#: management/commands/run_database_tasks.py:81
 msgid "Continuous mode (keep polling even when no tasks)"
 msgstr "Modo contínuo (continua consultando mesmo sem tarefas)"
 
-#: management/commands/run_database_tasks.py:79
+#: management/commands/run_database_tasks.py:87
 msgid "Polling interval in seconds for continuous mode (default: 5)"
 msgstr "Intervalo de consulta em segundos no modo contínuo (padrão: 5)"
 
-#: management/commands/run_database_tasks.py:85
+#: management/commands/run_database_tasks.py:93
 msgid "Maximum number of tasks to process (0=unlimited, default: 0)"
 msgstr "Número máximo de tarefas a processar (0=ilimitado, padrão: 0)"
 
-#: management/commands/run_database_tasks.py:92
+#: management/commands/run_database_tasks.py:100
 msgid ""
 "Where to look for tasks: 'db' polls the database, 'broker' receives from the "
 "backend's broker, 'both' does the broker first and falls back to the "
@@ -168,7 +168,7 @@ msgstr ""
 "e 'auto' (padrão) significa 'both' quando o backend tem um broker do qual "
 "receber e 'db' caso contrário"
 
-#: management/commands/run_database_tasks.py:104
+#: management/commands/run_database_tasks.py:112
 msgid ""
 "Seconds to wait for a broker message before looking again. Replaces --"
 "interval as the idle wait when receiving from a broker (default: 20)"
@@ -176,22 +176,33 @@ msgstr ""
 "Segundos de espera por uma mensagem do broker antes de verificar novamente. "
 "Substitui --interval como espera ociosa ao receber de um broker (padrão: 20)"
 
-#: management/commands/run_database_tasks.py:114
+#: management/commands/run_database_tasks.py:122
 msgid "Maximum number of broker messages to receive at a time (default: 1)"
 msgstr "Número máximo de mensagens do broker a receber de uma vez (padrão: 1)"
 
-#: management/commands/run_database_tasks.py:123
+#: management/commands/run_database_tasks.py:131
 msgid ""
 "Run this many worker processes from one command, each a copy of this command "
 "without --workers. With --continuous a worker that exits is replaced; "
 "without it the command exits when every worker has (default: 1)"
 msgstr ""
-"Executa esta quantidade de processos worker a partir de um único comando, cada "
-"um uma cópia deste comando sem --workers. Com --continuous, um worker que sai "
-"é substituído; sem ele, o comando termina quando todos os workers terminarem "
+"Executa esta quantidade de processos worker a partir de um único comando, "
+"cada um uma cópia deste comando sem --workers. Com --continuous, um worker "
+"que sai é substituído; sem ele, o comando termina quando todos os workers "
+"terminarem (padrão: 1)"
+
+#: management/commands/run_database_tasks.py:143
+msgid ""
+"Run tasks in this many threads inside the worker. The task code must be "
+"thread-safe. The worker still polls once per interval; each thread has a "
+"database connection of its own (default: 1)"
+msgstr ""
+"Executa as tarefas em esta quantidade de threads dentro do worker. O código "
+"das tarefas precisa ser thread-safe. O worker continua consultando uma vez "
+"por intervalo; cada thread tem a sua própria conexão com o banco de dados "
 "(padrão: 1)"
 
-#: management/commands/run_database_tasks.py:134
+#: management/commands/run_database_tasks.py:154
 msgid ""
 "Maximum seconds to wait for the running task after receiving SIGTERM/SIGINT "
 "before forcing exit (0=wait indefinitely, default: 0)"
@@ -199,7 +210,7 @@ msgstr ""
 "Tempo máximo, em segundos, de espera pela tarefa em execução após receber "
 "SIGTERM/SIGINT antes de forçar a saída (0=esperar indefinidamente, padrão: 0)"
 
-#: management/commands/run_database_tasks.py:143
+#: management/commands/run_database_tasks.py:163
 msgid ""
 "Do not install SIGTERM/SIGINT handlers; the process is terminated "
 "immediately, even while a task is running"
@@ -207,7 +218,7 @@ msgstr ""
 "Não instala manipuladores de SIGTERM/SIGINT; o processo é encerrado "
 "imediatamente, mesmo com uma tarefa em execução"
 
-#: management/commands/run_database_tasks.py:153
+#: management/commands/run_database_tasks.py:173
 msgid ""
 "Exit with this code when no task was processed, so a job scheduler can tell "
 "an idle run from a real one (0=exit normally, default: 0)"
@@ -216,7 +227,7 @@ msgstr ""
 "agendador de jobs distinga uma execução ociosa de uma real (0=sair "
 "normalmente, padrão: 0)"
 
-#: management/commands/run_database_tasks.py:164
+#: management/commands/run_database_tasks.py:184
 msgid ""
 "Exit with this code when at least one task failed or could not be run. Takes "
 "precedence over --empty-exit-code (0=exit normally, default: 0)"

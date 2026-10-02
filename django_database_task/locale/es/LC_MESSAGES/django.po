@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-database-task 0.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-30 17:27+0000\n"
+"POT-Creation-Date: 2026-10-02 05:07+0000\n"
 "PO-Revision-Date: 2026-09-30 00:00+0000\n"
 "Last-Translator: Shinya Okano <tokibito@gmail.com>\n"
 "Language-Team: Spanish\n"
@@ -135,31 +135,31 @@ msgstr "Número de tareas a procesar de una vez (predeterminado: 1000)"
 msgid "Show what would happen without changing anything"
 msgstr "Muestra lo que ocurriría sin cambiar nada"
 
-#: management/commands/run_database_tasks.py:55
+#: management/commands/run_database_tasks.py:63
 msgid "Execute tasks queued in the database"
 msgstr "Ejecuta las tareas encoladas en la base de datos"
 
-#: management/commands/run_database_tasks.py:62
+#: management/commands/run_database_tasks.py:70
 msgid "Queue name to process (all queues if not specified)"
 msgstr "Nombre de la cola a procesar (todas las colas si no se indica)"
 
-#: management/commands/run_database_tasks.py:68
+#: management/commands/run_database_tasks.py:76
 msgid "Backend name (default: default)"
 msgstr "Nombre del backend (predeterminado: default)"
 
-#: management/commands/run_database_tasks.py:73
+#: management/commands/run_database_tasks.py:81
 msgid "Continuous mode (keep polling even when no tasks)"
 msgstr "Modo continuo (sigue sondeando aunque no haya tareas)"
 
-#: management/commands/run_database_tasks.py:79
+#: management/commands/run_database_tasks.py:87
 msgid "Polling interval in seconds for continuous mode (default: 5)"
 msgstr "Intervalo de sondeo en segundos en modo continuo (predeterminado: 5)"
 
-#: management/commands/run_database_tasks.py:85
+#: management/commands/run_database_tasks.py:93
 msgid "Maximum number of tasks to process (0=unlimited, default: 0)"
 msgstr "Número máximo de tareas a procesar (0=ilimitado, predeterminado: 0)"
 
-#: management/commands/run_database_tasks.py:92
+#: management/commands/run_database_tasks.py:100
 msgid ""
 "Where to look for tasks: 'db' polls the database, 'broker' receives from the "
 "backend's broker, 'both' does the broker first and falls back to the "
@@ -171,7 +171,7 @@ msgstr ""
 "datos, y 'auto' (predeterminado) significa 'both' cuando el backend tiene un "
 "broker del que recibir y 'db' en caso contrario"
 
-#: management/commands/run_database_tasks.py:104
+#: management/commands/run_database_tasks.py:112
 msgid ""
 "Seconds to wait for a broker message before looking again. Replaces --"
 "interval as the idle wait when receiving from a broker (default: 20)"
@@ -180,12 +180,12 @@ msgstr ""
 "Sustituye a --interval como espera inactiva al recibir de un broker "
 "(predeterminado: 20)"
 
-#: management/commands/run_database_tasks.py:114
+#: management/commands/run_database_tasks.py:122
 msgid "Maximum number of broker messages to receive at a time (default: 1)"
 msgstr ""
 "Número máximo de mensajes del broker a recibir de una vez (predeterminado: 1)"
 
-#: management/commands/run_database_tasks.py:123
+#: management/commands/run_database_tasks.py:131
 msgid ""
 "Run this many worker processes from one command, each a copy of this command "
 "without --workers. With --continuous a worker that exits is replaced; "
@@ -196,7 +196,18 @@ msgstr ""
 "se reemplaza; sin él, el comando termina cuando todos los workers lo hayan "
 "hecho (predeterminado: 1)"
 
-#: management/commands/run_database_tasks.py:134
+#: management/commands/run_database_tasks.py:143
+msgid ""
+"Run tasks in this many threads inside the worker. The task code must be "
+"thread-safe. The worker still polls once per interval; each thread has a "
+"database connection of its own (default: 1)"
+msgstr ""
+"Ejecuta las tareas en esta cantidad de hilos dentro del worker. El código "
+"de las tareas debe ser seguro para hilos. El worker sigue consultando una "
+"vez por intervalo; cada hilo tiene su propia conexión a la base de datos "
+"(predeterminado: 1)"
+
+#: management/commands/run_database_tasks.py:154
 msgid ""
 "Maximum seconds to wait for the running task after receiving SIGTERM/SIGINT "
 "before forcing exit (0=wait indefinitely, default: 0)"
@@ -205,7 +216,7 @@ msgstr ""
 "SIGINT antes de forzar la salida (0=esperar indefinidamente, predeterminado: "
 "0)"
 
-#: management/commands/run_database_tasks.py:143
+#: management/commands/run_database_tasks.py:163
 msgid ""
 "Do not install SIGTERM/SIGINT handlers; the process is terminated "
 "immediately, even while a task is running"
@@ -213,7 +224,7 @@ msgstr ""
 "No instala manejadores de SIGTERM/SIGINT; el proceso termina de inmediato, "
 "incluso con una tarea en ejecución"
 
-#: management/commands/run_database_tasks.py:153
+#: management/commands/run_database_tasks.py:173
 msgid ""
 "Exit with this code when no task was processed, so a job scheduler can tell "
 "an idle run from a real one (0=exit normally, default: 0)"
@@ -222,7 +233,7 @@ msgstr ""
 "planificador de trabajos distinga una ejecución vacía de una real "
 "(0=terminar normalmente, predeterminado: 0)"
 
-#: management/commands/run_database_tasks.py:164
+#: management/commands/run_database_tasks.py:184
 msgid ""
 "Exit with this code when at least one task failed or could not be run. Takes "
 "precedence over --empty-exit-code (0=exit normally, default: 0)"

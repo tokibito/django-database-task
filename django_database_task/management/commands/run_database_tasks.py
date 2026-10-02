@@ -1,7 +1,9 @@
 import argparse
+import functools
 import logging
 import socket
 import sys
+import threading
 import uuid
 from contextlib import ExitStack
 
@@ -17,6 +19,7 @@ from django_database_task.executor import fetch_task, run_task_by_id
 from django_database_task.models import DatabaseTask
 from django_database_task.shutdown import GracefulShutdown, signal_name
 from django_database_task.supervisor import WorkerSupervisor, worker_arguments
+from django_database_task.threads import ExecutorThreads
 
 #: Where the worker looks for tasks to run.
 SOURCE_AUTO = "auto"
@@ -26,6 +29,11 @@ SOURCE_BOTH = "both"
 SOURCES = [SOURCE_AUTO, SOURCE_DATABASE, SOURCE_BROKER, SOURCE_BOTH]
 
 logger = logging.getLogger("django_database_task")
+
+#: How long the main thread waits for an executor thread to report back
+#: before looking at the shutdown flag again. A result wakes it at once;
+#: this only bounds the wait.
+COLLECT_WAIT = 1.0
 
 
 def _exit_code_argument(value):
@@ -127,6 +135,18 @@ class Command(BaseCommand):
             ),
         )
         parser.add_argument(
+            "--threads",
+            type=int,
+            default=1,
+            metavar="M",
+            help=_(
+                "Run tasks in this many threads inside the worker. The task "
+                "code must be thread-safe. The worker still polls once per "
+                "interval; each thread has a database connection of its own "
+                "(default: 1)"
+            ),
+        )
+        parser.add_argument(
             "--shutdown-timeout",
             type=float,
             default=0.0,
@@ -185,6 +205,9 @@ class Command(BaseCommand):
             raise CommandError("--max-messages must be at least 1")
         if options["workers"] < 1:
             raise CommandError("--workers must be at least 1")
+        threads = options["threads"]
+        if threads < 1:
+            raise CommandError("--threads must be at least 1")
 
         backend = task_backends[backend_name]
         source = self._resolve_source(backend, options["source"])
@@ -200,6 +223,8 @@ class Command(BaseCommand):
             self.stdout.write(f"Worker ID: {worker_id}")
             self.stdout.write(f"Backend: {backend_name}")
             self.stdout.write(f"Source: {source}")
+            if threads > 1:
+                self.stdout.write(f"Threads: {threads}")
             if queue_name:
                 self.stdout.write(f"Queue: {queue_name}")
             if continuous:
@@ -224,8 +249,10 @@ class Command(BaseCommand):
         self.verbosity = verbosity
         # Counted here rather than returned from the loop because a task can
         # fail at several depths (the run itself, the broker message that
-        # named it) and every one of them feeds the same exit code.
+        # named it) and every one of them feeds the same exit code. With
+        # --threads it is counted from several threads, hence the lock.
         self.tasks_failed = 0
+        self._failures_lock = threading.Lock()
 
         logger.info(
             "Worker started: id=%s backend=%s source=%s",
@@ -238,6 +265,7 @@ class Command(BaseCommand):
                 "source": source,
                 "queue_name": queue_name,
                 "continuous": continuous,
+                "threads": threads,
             },
         )
 
@@ -255,6 +283,11 @@ class Command(BaseCommand):
                 # A broker a worker receives from may hold a connection
                 # open, so release it however the loop ends.
                 stack.callback(self._close_broker, backend.broker)
+            executors = None
+            if threads > 1:
+                self._check_database_supports_concurrency("--threads", threads)
+                executors = ExecutorThreads(threads, worker_id).start()
+                stack.callback(executors.stop)
             tasks_processed = self._process_tasks(
                 shutdown=shutdown,
                 backend=backend,
@@ -268,6 +301,7 @@ class Command(BaseCommand):
                 wait_time=wait_time,
                 max_messages=max_messages,
                 verbosity=verbosity,
+                executors=executors,
             )
 
         if shutdown.is_set() and verbosity >= 1:
@@ -315,7 +349,7 @@ class Command(BaseCommand):
         workers = options["workers"]
         verbosity = options["verbosity"]
 
-        self._check_database_supports_workers(workers)
+        self._check_database_supports_concurrency("--workers", workers)
 
         supervisor = WorkerSupervisor(
             worker_arguments(),
@@ -333,23 +367,25 @@ class Command(BaseCommand):
         if exit_code:
             sys.exit(exit_code)
 
-    def _check_database_supports_workers(self, workers):
+    def _check_database_supports_concurrency(self, option, value):
         """
-        Refuse several workers on SQLite.
+        Refuse several workers, or several threads, on SQLite.
 
         Nothing runs twice there, since a task is claimed with a conditional
-        UPDATE, but SQLite has no row locks: two workers claiming at once
-        both hold the read lock and one is refused the write with "database
-        is locked", which the worker counts as a failed task. The README
-        says SQLite is for development and single-worker deployments; this
-        is where that stops being a note.
+        UPDATE, but SQLite has no row locks: two claims at once both hold the
+        read lock and one is refused the write with "database is locked",
+        which the worker counts as a failed task. Threads claim from one
+        thread when polling the database, but not for broker messages, and
+        their finishing writes collide the same way. The README says SQLite
+        is for development and single-worker deployments; this is where
+        that stops being a note.
         """
         alias = router.db_for_write(DatabaseTask)
         if connections[alias].vendor == "sqlite":
             raise CommandError(
-                f"--workers {workers} needs a database with row locks, and "
-                f"the {alias!r} database is SQLite. Run one worker, or use "
-                "PostgreSQL, MySQL or MariaDB."
+                f"{option} {value} needs a database with row locks, and the "
+                f"{alias!r} database is SQLite. Run one worker with one "
+                "thread, or use PostgreSQL, MySQL or MariaDB."
             )
 
     def _exit_code(self, tasks_processed, empty_exit_code, failed_exit_code):
@@ -407,19 +443,62 @@ class Command(BaseCommand):
         wait_time=20.0,
         max_messages=1,
         verbosity=1,
+        executors=None,
     ):
+        """
+        The worker loop: find tasks and run them until there is reason to stop.
+
+        Without ``executors`` every task is run right here, in the thread
+        that found it. With them (``--threads``) this thread only fetches,
+        receives and claims, and hands each task to an idle executor; the
+        executors report back what they ran, and that is added up here.
+        """
         use_broker = source in (SOURCE_BROKER, SOURCE_BOTH)
         use_database = source in (SOURCE_DATABASE, SOURCE_BOTH)
         broker = backend.broker if use_broker else None
         tasks_processed = 0
+        exhausted = False
+
+        def in_flight():
+            return executors.busy if executors is not None else 0
+
+        def free_slots():
+            return executors.idle_count() if executors is not None else 1
+
+        def collect(wait=False):
+            """Add up what the executors have finished since last time."""
+            nonlocal tasks_processed
+            if executors is None:
+                return
+            outcomes = executors.collect(timeout=COLLECT_WAIT if wait else None)
+            tasks_processed += sum(1 for processed in outcomes if processed)
 
         def remaining():
-            """How many more tasks may be run, capped by --max-messages."""
+            """How many more tasks may be started right now."""
+            limit = max_messages
+            if executors is not None:
+                limit = min(limit, free_slots())
             if not max_tasks:
-                return max_messages
-            return min(max_messages, max_tasks - tasks_processed)
+                return limit
+            return min(limit, max_tasks - tasks_processed - in_flight())
+
+        def reached_max():
+            # Tasks handed to an executor count towards the cap, so no more
+            # than --max-tasks are ever started. One that turns out not to
+            # run (a broker message for a task that is gone) can leave the
+            # run short of the cap by that many.
+            return self._reached_max_tasks(
+                tasks_processed + in_flight(), max_tasks, verbosity
+            )
 
         while not shutdown.is_set():
+            collect()
+            if executors is not None and free_slots() == 0:
+                # Every executor is busy: wait for one to come back, not
+                # for the poll interval.
+                collect(wait=True)
+                continue
+
             worked = False
 
             if broker is not None:
@@ -435,10 +514,12 @@ class Command(BaseCommand):
                     wait,
                     remaining(),
                     verbosity,
+                    executors,
                 )
-                tasks_processed += count
+                if executors is None:
+                    tasks_processed += count
                 worked = count > 0
-                if self._reached_max_tasks(tasks_processed, max_tasks, verbosity):
+                if reached_max():
                     break
                 if shutdown.is_set():
                     break
@@ -447,19 +528,24 @@ class Command(BaseCommand):
                 task = fetch_task(queue_name=queue_name, backend_name=backend_name)
                 if task is not None:
                     worked = True
-                    if self._run_database_task(backend, task, worker_id, verbosity):
+                    if executors is None:
+                        counted = self._run_database_task(
+                            backend, task, worker_id, verbosity
+                        )
+                    else:
+                        counted = self._dispatch_database_task(
+                            executors, backend, task, verbosity
+                        )
+                    if counted:
                         tasks_processed += 1
-                        if self._reached_max_tasks(
-                            tasks_processed, max_tasks, verbosity
-                        ):
-                            break
+                    if reached_max():
+                        break
 
             if worked:
                 continue
 
             if not continuous:
-                if verbosity >= 1:
-                    self.stdout.write("No more tasks to process.")
+                exhausted = True
                 break
 
             if verbosity >= 2:
@@ -471,7 +557,7 @@ class Command(BaseCommand):
             if source == SOURCE_BOTH and wait_time > 0:
                 # The broker's own wait doubles as the idle interval, so a
                 # message wakes the worker up straight away.
-                tasks_processed += self._receive_and_run(
+                count = self._receive_and_run(
                     broker,
                     backend_name,
                     queue_name,
@@ -479,8 +565,11 @@ class Command(BaseCommand):
                     wait_time,
                     remaining(),
                     verbosity,
+                    executors,
                 )
-                if self._reached_max_tasks(tasks_processed, max_tasks, verbosity):
+                if executors is None:
+                    tasks_processed += count
+                if reached_max():
                     break
             elif source == SOURCE_BROKER and wait_time > 0:
                 # receive() has already waited.
@@ -489,6 +578,16 @@ class Command(BaseCommand):
                 # Interruptible sleep: returns as soon as a shutdown is
                 # requested instead of waiting out the interval.
                 break
+
+        while in_flight():
+            # The tasks already handed out finish first. A shutdown that
+            # runs past --shutdown-timeout ends the process from the
+            # GracefulShutdown timer, as it does for a task run inline.
+            collect(wait=True)
+
+        if exhausted and verbosity >= 1:
+            # Reported after the executors are done, so it reads in order.
+            self.stdout.write("No more tasks to process.")
 
         return tasks_processed
 
@@ -501,7 +600,7 @@ class Command(BaseCommand):
 
     def _run_database_task(self, backend, task, worker_id, verbosity):
         """
-        Run a task fetched straight from the database.
+        Run a task fetched straight from the database, here and now.
 
         Returns:
             True if the task was run here, False if another worker claimed
@@ -513,14 +612,7 @@ class Command(BaseCommand):
         try:
             result = backend.run_task(task, worker_id=worker_id)
         except Exception as e:
-            logger.exception(
-                "Worker could not run task: id=%s path=%s",
-                task.id,
-                task.task_path,
-                extra=task_log_fields(task, worker_id),
-            )
-            self.stdout.write(self.style.ERROR(f"  Error running task: {e}"))
-            self.tasks_failed += 1
+            self._report_run_error(task, worker_id, e)
             return True
 
         if result is None:
@@ -528,10 +620,78 @@ class Command(BaseCommand):
                 self.stdout.write("  Task is not ready to run; nothing to do")
             return False
 
-        if result.status != TaskResultStatus.SUCCESSFUL:
-            self.tasks_failed += 1
-        self._report_result(result.status, verbosity)
+        self._record_result(result, verbosity)
         return True
+
+    def _dispatch_database_task(self, executors, backend, task, verbosity):
+        """
+        Claim a task fetched from the database and hand it to an executor.
+
+        The claim happens here, in the fetching thread, so that the next
+        fetch does not return the same READY row; it is made with the
+        executor's worker id, which is what the task records. The executor
+        reports the run back through the loop's ``collect()``.
+
+        Returns:
+            True if the task is to be counted now (the claim itself failed,
+            which is a failed task that reached no executor), False if it
+            was handed out or was no longer READY.
+        """
+        index = executors.acquire()
+        thread_worker_id = executors.worker_ids[index]
+        if verbosity >= 1:
+            self.stdout.write(f"\nProcessing task: {task.id} ({task.task_path})")
+
+        try:
+            claimed = backend.claim_task(task, worker_id=thread_worker_id)
+        except Exception as e:
+            executors.release(index)
+            self._report_run_error(task, thread_worker_id, e)
+            return True
+
+        if not claimed:
+            executors.release(index)
+            if verbosity >= 1:
+                self.stdout.write("  Task is not ready to run; nothing to do")
+            return False
+
+        executors.submit(
+            index,
+            functools.partial(
+                self._run_claimed_task, backend, task, thread_worker_id, verbosity
+            ),
+        )
+        return False
+
+    def _run_claimed_task(self, backend, task, worker_id, verbosity):
+        """Run a task :meth:`_dispatch_database_task` claimed, in an executor."""
+        try:
+            result = backend.run_claimed_task(task, worker_id=worker_id)
+        except Exception as e:
+            self._report_run_error(task, worker_id, e)
+            return True
+        self._record_result(result, verbosity)
+        return True
+
+    def _report_run_error(self, task, worker_id, error):
+        """Record that this worker could not run ``task`` at all."""
+        logger.exception(
+            "Worker could not run task: id=%s path=%s",
+            task.id,
+            task.task_path,
+            extra=task_log_fields(task, worker_id),
+        )
+        self.stdout.write(self.style.ERROR(f"  Error running task: {error}"))
+        self._count_failure()
+
+    def _record_result(self, result, verbosity):
+        if result.status != TaskResultStatus.SUCCESSFUL:
+            self._count_failure()
+        self._report_result(result.status, verbosity)
+
+    def _count_failure(self):
+        with self._failures_lock:
+            self.tasks_failed += 1
 
     def _receive_and_run(
         self,
@@ -542,8 +702,16 @@ class Command(BaseCommand):
         wait_seconds,
         max_messages,
         verbosity,
+        executors=None,
     ):
-        """Receive messages from the broker and run the tasks they name."""
+        """
+        Receive messages from the broker and run the tasks they name.
+
+        Returns:
+            Without executors, how many tasks were run. With them, how many
+            messages were handed out; the executors report the runs back
+            through the loop's ``collect()``.
+        """
         if max_messages < 1:
             return 0
 
@@ -567,11 +735,29 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f"\nError receiving from broker: {e}"))
             return 0
 
-        return sum(
-            1
-            for message in messages or []
-            if self._run_broker_message(broker, message, worker_id, verbosity)
-        )
+        messages = list(messages or [])
+        if executors is None:
+            return sum(
+                1
+                for message in messages
+                if self._run_broker_message(broker, message, worker_id, verbosity)
+            )
+
+        for message in messages:
+            # remaining() capped the receive by the idle executors, so one
+            # is free for each message.
+            index = executors.acquire()
+            executors.submit(
+                index,
+                functools.partial(
+                    self._run_broker_message,
+                    broker,
+                    message,
+                    executors.worker_ids[index],
+                    verbosity,
+                ),
+            )
+        return len(messages)
 
     def _run_broker_message(self, broker, message, worker_id, verbosity):
         """
@@ -602,7 +788,7 @@ class Command(BaseCommand):
                 extra=self._broker_task_log_fields(message, worker_id),
             )
             self.stdout.write(self.style.ERROR(f"  Error running task: {e}"))
-            self.tasks_failed += 1
+            self._count_failure()
             self._nack(broker, message)
             return False
 
@@ -613,9 +799,7 @@ class Command(BaseCommand):
                 self.stdout.write("  Task is not ready to run; nothing to do")
             return False
 
-        if result.status != TaskResultStatus.SUCCESSFUL:
-            self.tasks_failed += 1
-        self._report_result(result.status, verbosity)
+        self._record_result(result, verbosity)
         return True
 
     def _broker_task_log_fields(self, message, worker_id):
