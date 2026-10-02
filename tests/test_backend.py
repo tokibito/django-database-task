@@ -1,6 +1,7 @@
 """Tests for the database task backend."""
 
 from datetime import timedelta
+from unittest.mock import patch
 
 import pytest
 from django.tasks import task_backends
@@ -8,6 +9,7 @@ from django.tasks.base import TaskResultStatus
 from django.tasks.exceptions import TaskResultDoesNotExist
 from django.utils import timezone
 
+from django_database_task.backends import DatabaseTaskBackend
 from django_database_task.models import DatabaseTask
 
 from . import tasks as test_tasks
@@ -433,3 +435,53 @@ class TestAsyncTaskExecution:
 
         db_task.refresh_from_db()
         assert db_task.status == TaskResultStatus.FAILED
+
+
+@pytest.mark.django_db
+class TestClaimAndRunSeparately:
+    """claim_task() and run_claimed_task() are the two steps of run_task()."""
+
+    def test_claim_then_run(self):
+        test_tasks.counting_task_runs.clear()
+        result = counting_task.enqueue()
+        db_task = DatabaseTask.objects.get(id=result.id)
+        backend = task_backends["default"]
+
+        assert backend.claim_task(db_task, worker_id="worker-1") is True
+        claimed = DatabaseTask.objects.get(id=result.id)
+        assert claimed.status == TaskResultStatus.RUNNING
+        assert claimed.worker_ids_json == ["worker-1"]
+        assert test_tasks.counting_task_runs == []
+
+        final_result = backend.run_claimed_task(db_task, worker_id="worker-1")
+
+        assert final_result.status == TaskResultStatus.SUCCESSFUL
+        assert test_tasks.counting_task_runs == [1]
+        assert DatabaseTask.objects.get(id=result.id).status == (
+            TaskResultStatus.SUCCESSFUL
+        )
+
+    def test_a_lost_claim_returns_false_and_writes_nothing(self):
+        result = counting_task.enqueue()
+        first = DatabaseTask.objects.get(id=result.id)
+        second = DatabaseTask.objects.get(id=result.id)
+        backend = task_backends["default"]
+
+        assert backend.claim_task(first, worker_id="worker-1") is True
+        assert backend.claim_task(second, worker_id="worker-2") is False
+
+        assert DatabaseTask.objects.get(id=result.id).worker_ids_json == ["worker-1"]
+
+    def test_run_task_is_the_two_steps(self):
+        result = simple_task.enqueue(1, 2)
+        db_task = DatabaseTask.objects.get(id=result.id)
+        backend = task_backends["default"]
+
+        with (
+            patch.object(DatabaseTaskBackend, "claim_task", return_value=True) as claim,
+            patch.object(DatabaseTaskBackend, "run_claimed_task") as run,
+        ):
+            backend.run_task(db_task, worker_id="w")
+
+        claim.assert_called_once_with(db_task, "w")
+        run.assert_called_once_with(db_task, "w")

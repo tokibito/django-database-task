@@ -352,14 +352,44 @@ class DatabaseTaskBackend(BaseTaskBackend):
 
         return result
 
+    def claim_task(self, db_task, worker_id=None):
+        """
+        Move a READY task to RUNNING and record the attempt on it.
+
+        The first of the two steps of :meth:`run_task`; the second is
+        :meth:`run_claimed_task`. A worker that fetches tasks in one thread
+        and runs them in another claims here, in the fetching thread, so
+        that its next fetch does not hand it the same READY row again.
+
+        The row is locked and its status re-checked inside one transaction,
+        so of two workers holding the same READY row exactly one gets to
+        write RUNNING. The worker id is appended to the list stored in the
+        database rather than to the copy on ``db_task``, so an attempt
+        recorded after ``db_task`` was loaded is kept.
+
+        Args:
+            db_task: The :class:`~django_database_task.models.DatabaseTask`
+                to claim. It must be READY.
+            worker_id: Optional worker identifier, recorded on the task.
+
+        Returns:
+            True if this call claimed the task, and ``db_task`` carries what
+            was written. False if it was no longer READY (another worker
+            claimed it, or it was deleted); nothing was written and the task
+            must not be run.
+        """
+        return self._claim_task(db_task, worker_id)
+
     def run_task(self, db_task, worker_id=None):
         """
         Claim a task and execute it (called from the executor and the
         management command).
 
-        The task is claimed with :meth:`_claim_task` first, so two workers
+        The task is claimed with :meth:`claim_task` first, so two workers
         that fetched the same READY row cannot both run it: whichever claims
-        second gets None and runs nothing.
+        second gets None and runs nothing. The run itself is
+        :meth:`run_claimed_task`; the two are separate so that a worker can
+        claim in one thread and run in another.
 
         A task whose function cannot be imported (the module was renamed,
         the function removed, the worker runs older code than the enqueuer)
@@ -380,7 +410,7 @@ class DatabaseTaskBackend(BaseTaskBackend):
             not run here. The result of a task that could not be started has
             ``task`` set to None.
         """
-        if not self._claim_task(db_task, worker_id):
+        if not self.claim_task(db_task, worker_id):
             logger.info(
                 "Task not run: id=%s path=%s is no longer READY",
                 db_task.id,
@@ -388,7 +418,21 @@ class DatabaseTaskBackend(BaseTaskBackend):
                 extra=task_log_fields(db_task, worker_id),
             )
             return None
+        return self.run_claimed_task(db_task, worker_id)
 
+    def run_claimed_task(self, db_task, worker_id=None):
+        """
+        Execute a task that :meth:`claim_task` has moved to RUNNING.
+
+        The second of the two steps of :meth:`run_task`, which documents
+        what is recorded, logged and signalled. ``db_task`` must be the
+        instance the claim was made with, as the claim wrote the attempt
+        onto it, and ``worker_id`` the one it was claimed with.
+
+        Returns:
+            TaskResult after execution. The result of a task that could not
+            be started has ``task`` set to None.
+        """
         # Past the RUNNING write but before the block that records failures,
         # so an error here would otherwise leave the task RUNNING with no
         # error, and no other worker would take it.
@@ -541,19 +585,7 @@ class DatabaseTaskBackend(BaseTaskBackend):
         return error
 
     def _claim_task(self, db_task, worker_id):
-        """
-        Move a READY task to RUNNING and record the attempt on it.
-
-        The row is locked and its status re-checked inside one transaction,
-        so of two workers holding the same READY row exactly one gets to
-        write RUNNING. The worker id is appended to the list stored in the
-        database rather than to the copy on ``db_task``, so an attempt
-        recorded after ``db_task`` was loaded is kept.
-
-        Returns:
-            True if this call claimed the task, False if it was no longer
-            READY. On True, ``db_task`` carries what was written.
-        """
+        """The claim behind :meth:`claim_task`, which documents it."""
         from .models import DatabaseTask
 
         now = timezone.now()
