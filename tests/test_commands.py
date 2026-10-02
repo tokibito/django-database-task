@@ -1306,7 +1306,7 @@ class TestRunDatabaseTasksWorkers:
         out = StringIO()
         with (
             patch(f"{COMMAND_MODULE}.worker_arguments", return_value=stub_worker(code)),
-            patch.object(RunDatabaseTasks, "_check_database_supports_workers"),
+            patch.object(RunDatabaseTasks, "_check_database_supports_concurrency"),
         ):
             call_command("run_database_tasks", stdout=out, stderr=out, **options)
         return out.getvalue()
@@ -1379,3 +1379,37 @@ class TestRunDatabaseTasksWorkers:
         assert "; restarting." in output
         assert "Received SIGTERM: stopping" in output
         assert "Shutdown complete: every worker exited." in output
+
+
+@pytest.mark.django_db
+class TestRunDatabaseTasksThreads:
+    """
+    What the command checks for --threads before starting any thread.
+
+    The threads at work are tested against PostgreSQL in
+    tests/postgres/test_threads.py, and the pool on its own in
+    tests/test_threads.py.
+    """
+
+    def test_threads_must_be_positive(self):
+        with pytest.raises(CommandError, match="--threads must be at least 1"):
+            call_command("run_database_tasks", threads=0, stdout=StringIO())
+
+    def test_one_thread_is_the_worker_itself(self):
+        result = simple_task.enqueue(1, 2)
+        out = StringIO()
+
+        call_command("run_database_tasks", threads=1, stdout=out)
+
+        assert "Threads:" not in out.getvalue()
+        worker_ids = DatabaseTask.objects.get(id=result.id).worker_ids_json
+        assert len(worker_ids) == 1
+        assert "-t" not in worker_ids[0]
+
+    @pytest.mark.skipif(
+        connections["default"].vendor != "sqlite",
+        reason="the refusal is for SQLite",
+    )
+    def test_several_threads_are_refused_on_sqlite(self):
+        with pytest.raises(CommandError, match="--threads 2 needs a database"):
+            call_command("run_database_tasks", threads=2, stdout=StringIO())

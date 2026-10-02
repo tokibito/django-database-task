@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-database-task 0.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-30 17:27+0000\n"
+"POT-Creation-Date: 2026-10-02 05:07+0000\n"
 "PO-Revision-Date: 2026-09-30 00:00+0000\n"
 "Last-Translator: Shinya Okano <tokibito@gmail.com>\n"
 "Language-Team: Simplified Chinese\n"
@@ -123,31 +123,31 @@ msgstr "每次处理的任务数（默认：1000）"
 msgid "Show what would happen without changing anything"
 msgstr "显示将会执行的操作，但不做任何更改"
 
-#: management/commands/run_database_tasks.py:55
+#: management/commands/run_database_tasks.py:63
 msgid "Execute tasks queued in the database"
 msgstr "执行在数据库中排队的任务"
 
-#: management/commands/run_database_tasks.py:62
+#: management/commands/run_database_tasks.py:70
 msgid "Queue name to process (all queues if not specified)"
 msgstr "要处理的队列名称（未指定时为所有队列）"
 
-#: management/commands/run_database_tasks.py:68
+#: management/commands/run_database_tasks.py:76
 msgid "Backend name (default: default)"
 msgstr "后端名称（默认：default）"
 
-#: management/commands/run_database_tasks.py:73
+#: management/commands/run_database_tasks.py:81
 msgid "Continuous mode (keep polling even when no tasks)"
 msgstr "持续模式（没有任务时也继续轮询）"
 
-#: management/commands/run_database_tasks.py:79
+#: management/commands/run_database_tasks.py:87
 msgid "Polling interval in seconds for continuous mode (default: 5)"
 msgstr "持续模式的轮询间隔秒数（默认：5）"
 
-#: management/commands/run_database_tasks.py:85
+#: management/commands/run_database_tasks.py:93
 msgid "Maximum number of tasks to process (0=unlimited, default: 0)"
 msgstr "要处理的最大任务数（0=不限，默认：0）"
 
-#: management/commands/run_database_tasks.py:92
+#: management/commands/run_database_tasks.py:100
 msgid ""
 "Where to look for tasks: 'db' polls the database, 'broker' receives from the "
 "backend's broker, 'both' does the broker first and falls back to the "
@@ -158,7 +158,7 @@ msgstr ""
 "消息代理再回退到数据库，'auto'（默认）在后端有可接收的消息代理时为 'both'，否"
 "则为 'db'"
 
-#: management/commands/run_database_tasks.py:104
+#: management/commands/run_database_tasks.py:112
 msgid ""
 "Seconds to wait for a broker message before looking again. Replaces --"
 "interval as the idle wait when receiving from a broker (default: 20)"
@@ -166,20 +166,29 @@ msgstr ""
 "再次查看前等待消息代理消息的秒数。从消息代理接收时，取代 --interval 作为空闲"
 "时的等待（默认：20）"
 
-#: management/commands/run_database_tasks.py:114
+#: management/commands/run_database_tasks.py:122
 msgid "Maximum number of broker messages to receive at a time (default: 1)"
 msgstr "每次接收的消息代理消息的最大数量（默认：1）"
 
-#: management/commands/run_database_tasks.py:123
+#: management/commands/run_database_tasks.py:131
 msgid ""
 "Run this many worker processes from one command, each a copy of this command "
 "without --workers. With --continuous a worker that exits is replaced; "
 "without it the command exits when every worker has (default: 1)"
 msgstr ""
-"从一条命令启动这么多个工作进程，每个都是不带 --workers 的本命令副本。指定 --continuous 时，"
-"退出的工作进程会被替换；未指定时，所有工作进程退出后命令即退出（默认：1）"
+"从一条命令启动这么多个工作进程，每个都是不带 --workers 的本命令副本。指定 --"
+"continuous 时，退出的工作进程会被替换；未指定时，所有工作进程退出后命令即退出"
+"（默认：1）"
 
-#: management/commands/run_database_tasks.py:134
+#: management/commands/run_database_tasks.py:143
+msgid ""
+"Run tasks in this many threads inside the worker. The task code must be "
+"thread-safe. The worker still polls once per interval; each thread has a "
+"database connection of its own (default: 1)"
+msgstr ""
+"在工作进程内用这么多个线程运行任务。任务代码必须是线程安全的。工作进程仍每个间隔轮询一次；每个线程有自己的数据库连接（默认：1）"
+
+#: management/commands/run_database_tasks.py:154
 msgid ""
 "Maximum seconds to wait for the running task after receiving SIGTERM/SIGINT "
 "before forcing exit (0=wait indefinitely, default: 0)"
@@ -187,13 +196,13 @@ msgstr ""
 "收到 SIGTERM/SIGINT 后、强制退出前等待正在运行的任务的最长秒数（0=无限期等"
 "待，默认：0）"
 
-#: management/commands/run_database_tasks.py:143
+#: management/commands/run_database_tasks.py:163
 msgid ""
 "Do not install SIGTERM/SIGINT handlers; the process is terminated "
 "immediately, even while a task is running"
 msgstr "不安装 SIGTERM/SIGINT 处理程序；即使有任务正在运行，进程也会立即终止"
 
-#: management/commands/run_database_tasks.py:153
+#: management/commands/run_database_tasks.py:173
 msgid ""
 "Exit with this code when no task was processed, so a job scheduler can tell "
 "an idle run from a real one (0=exit normally, default: 0)"
@@ -201,7 +210,7 @@ msgstr ""
 "未处理任何任务时以此代码退出，以便作业调度器区分空转的运行与实际的运行（0=正"
 "常退出，默认：0）"
 
-#: management/commands/run_database_tasks.py:164
+#: management/commands/run_database_tasks.py:184
 msgid ""
 "Exit with this code when at least one task failed or could not be run. Takes "
 "precedence over --empty-exit-code (0=exit normally, default: 0)"

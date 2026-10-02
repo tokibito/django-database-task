@@ -16,7 +16,7 @@ A database-backed task queue backend for Django's built-in task framework.
 - **Django Admin integration** - View and manage tasks from the admin interface
 - **Async support** - Supports async task functions
 - **Graceful shutdown** - Workers finish the running task before exiting on `SIGTERM`
-- **Parallel workers** - `--workers N` keeps N worker processes running from one command, or run one per systemd unit / Kubernetes replica as before
+- **Parallel workers** - `--workers N` keeps N worker processes running from one command, `--threads M` runs M tasks at once inside a worker, or run one process per systemd unit / Kubernetes replica as before
 - **Crash recovery** - Tasks stranded in `RUNNING` by a killed worker are found and requeued
 - **Monitoring** - Counts per status and the age of the oldest pending task, from Python or `/tasks/status/`
 - **Job scheduler friendly** - Opt-in exit codes that tell an idle run from a failed one, plus structured log fields for JP1 / Hinemos / cron / systemd timers
@@ -260,6 +260,7 @@ python manage.py run_database_tasks [options]
 | `--wait-time` | Seconds to wait for a broker message before looking again (default: 20) |
 | `--max-messages` | Maximum number of broker messages to receive at a time (default: 1) |
 | `--workers` | Number of worker processes to run from this command (default: 1). See [Running several workers](#running-several-workers) |
+| `--threads` | Number of threads running tasks inside the worker (default: 1). The task code must be thread-safe. See [`--threads M`](#--threads-m) |
 | `--shutdown-timeout` | Maximum seconds to wait for the running task after `SIGTERM`/`SIGINT` before forcing exit (0=wait indefinitely, default: 0) |
 | `--no-graceful-shutdown` | Do not install signal handlers (terminate immediately, even while a task is running) |
 | `--empty-exit-code` | Exit with this code when no task was processed (0=exit normally, default: 0) |
@@ -699,12 +700,13 @@ with GracefulShutdown(timeout=50) as shutdown:
 `run_database_tasks` is one process running one task at a time. To run more
 tasks at once, run more of them: every worker claims its own tasks with
 `SELECT FOR UPDATE SKIP LOCKED`, so workers on one host or on many never run
-the same task. There are two ways to keep N of them running.
+the same task. There are three tiers, and they combine.
 
-| | The processes are kept running by | Reach for it when |
+| | Unit of parallelism | Reach for it when |
 |---|---|---|
-| A process manager | systemd template units, Kubernetes replicas, supervisord `numprocs` | You have one. It restarts, logs and health-checks the workers, and the command's default (one process, with the signals and exit codes described above) is what it expects |
-| `--workers N` | The command itself | One host without a process manager, or one unit or container that should hold N workers: a small supervisor inside the command keeps N worker processes running |
+| A process manager | Processes, kept running by systemd template units, Kubernetes replicas, supervisord `numprocs` | You have one. It restarts, logs and health-checks the workers, and the command's default (one process, with the signals and exit codes described above) is what it expects |
+| `--workers N` | Processes, kept running by the command itself | One host without a process manager, or one unit or container that should hold N workers: a small supervisor inside the command keeps N worker processes running |
+| `--threads M` | Threads inside one worker process | Memory is tight and the tasks are I/O-bound and written thread-safe: M tasks in progress for the footprint of one process, with one poller |
 
 ### `--workers N`
 
@@ -767,11 +769,52 @@ Shutdown complete: every worker exited.
   [requeue_stale_database_tasks](#recovering-tasks-left-in-running-status)
   is for.
 
+### `--threads M`
+
+```bash
+python manage.py run_database_tasks --continuous --threads 8
+```
+
+The worker stays one process with one polling thread, which is still the
+one that fetches, receives from the broker and handles the signals. What
+changes is that the task it found is handed to one of M executor threads
+instead of being run inline, so M tasks are in progress at once. The polling
+load stays at one fetch per `--interval`; a broker receive asks for no more
+messages than there are idle threads, up to `--max-messages`.
+
+- **Thread safety is on you.** The M tasks share one interpreter, one set of
+  module globals and whatever your task code caches. A task that is not
+  thread-safe, that calls `os._exit()`, or that crashes the interpreter takes
+  the other M-1 with it. `--workers` asks nothing of the task code; this
+  option does, and that is the trade it makes explicit.
+- **I/O-bound only.** The GIL serialises Python bytecode across the threads,
+  so CPU-bound tasks gain nothing from M; HTTP calls, database-heavy tasks
+  and anything that waits do. For CPU-bound work use `--workers`.
+- **Memory, not connections.** Threads share the process, so M tasks cost
+  roughly one worker's footprint rather than M. They do not save database
+  connections: Django keeps one per thread, so a worker with M threads holds
+  M connections, plus the polling thread's, plus the `LISTEN` connection with
+  the PostgreSQL broker. Each executor calls `close_old_connections()` after
+  every task, the way a request does, so `CONN_MAX_AGE` applies.
+- **Worker ids.** Each thread records its own id on the tasks it runs,
+  `<worker id>-t1` to `<worker id>-tM`, so `worker_ids` and the log fields
+  say which thread ran what. The claim itself is made by the polling thread,
+  with the executor's id, so the next fetch never hands out the same row.
+- **Shutdown and `--max-tasks`** work as with one thread: on `SIGTERM` no
+  more tasks are handed out and the ones in the threads finish, within
+  `--shutdown-timeout` if set; `--max-tasks` counts the tasks handed out, so
+  no more than that many are ever started.
+- **Combining.** `--workers N --threads M` is N processes with M threads
+  each: N pollers, N×M tasks in progress, process isolation between the N.
+- **SQLite** is refused above one thread, as with `--workers`: without row
+  locks, claims and finishing writes from several threads collide on the
+  database lock.
+
 ### Trade-offs
 
 Processes are the simple, robust unit of parallelism, and they are not free.
 What `--workers N` buys and what it costs, so you can pick N with your eyes
-open:
+open, and where `--threads M` stands against it:
 
 - **Isolation.** Every worker is a process of its own. A task that crashes the
   interpreter, leaks until the OOM killer steps in, or blocks forever takes
@@ -818,13 +861,12 @@ open:
   running `--workers N`, is a reasonable middle: the manager handles the
   machine-level concerns and the supervisor the fan-out.
 - **SQLite** has no row locks, so the command refuses `--workers` above 1
-  there. Use PostgreSQL, MySQL or MariaDB.
-
-Threads inside a worker, the memory-lean option for I/O-bound tasks that are
-written thread-safe, are not part of this release; the design is tracked in
-[#25](https://github.com/tokibito/django-database-task/issues/25). On this
-backend they would save memory but not database connections, since each
-thread needs a connection of its own.
+  there, and `--threads` above 1 too. Use PostgreSQL, MySQL or MariaDB.
+- **Threads instead.** [`--threads M`](#--threads-m) trades the isolation
+  and the CPU scaling above for memory: M tasks in progress for one
+  process's footprint, as long as the tasks are I/O-bound and thread-safe.
+  It does not reduce database connections, and one bad task can take the
+  whole worker down. When memory is not the constraint, prefer processes.
 
 ## Running from a job scheduler
 

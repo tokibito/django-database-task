@@ -122,3 +122,17 @@ def shutdown_aware_task(iterations=10):
             break
         completed += 1
     return completed
+
+
+#: Set by a test to a threading.Barrier; barrier_task() waits on it, so the
+#: tasks only finish if as many of them are running at the same time.
+barrier = None
+
+
+@task
+def barrier_task():
+    """Task that waits for the other parties of ``barrier`` before returning."""
+    from . import tasks
+
+    tasks.barrier.wait()
+    return "met"

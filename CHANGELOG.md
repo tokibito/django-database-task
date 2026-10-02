@@ -4,6 +4,23 @@
 
 ### Added
 
+- **`--threads M` on `run_database_tasks`.** The worker runs M tasks at
+  once in executor threads while staying one process with one polling
+  thread, which still does the fetching, the broker receives and the signal
+  handling. The polling load stays at one fetch per `--interval`, a broker
+  receive asks for no more messages than there are idle threads, and the
+  claim is made by the polling thread with the executor's worker id, so the
+  next fetch never hands out the same row. Each thread records its own id
+  (`<worker id>-t1` to `-tM`) on the tasks it runs, has a database
+  connection of its own, and calls `close_old_connections()` after every
+  task. `--max-tasks` counts the tasks handed out, failures are counted
+  across the threads, and on `SIGTERM` the tasks in the threads finish
+  before the worker exits. The task code must be thread-safe, and the option
+  only helps I/O-bound tasks; the README's *`--threads M`* and *Trade-offs*
+  sections say what it saves (memory, not connections) and what it costs.
+  Several threads are refused on SQLite, as several workers are. The default
+  is 1, with the loop unchanged, so existing projects need no changes.
+  ([#25](https://github.com/tokibito/django-database-task/issues/25))
 - **`claim_task()` and `run_claimed_task()` on the backend.** The two steps
   of `DatabaseTaskBackend.run_task()`, which now calls one and then the
   other, so that a worker can claim a task in the thread that fetched it and
