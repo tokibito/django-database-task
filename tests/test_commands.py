@@ -17,12 +17,16 @@ from unittest.mock import patch
 import pytest
 from django.core.management import ManagementUtility, call_command
 from django.core.management.base import CommandError
+from django.db import connections
 from django.tasks.base import TaskResultStatus
 from django.utils import timezone, translation
 
 from django_database_task.backends import DatabaseTaskBackend
 from django_database_task.brokers import BrokerMessage, HTTPPushBroker, PullBroker
 from django_database_task.executor import DEFAULT_MAX_ATTEMPTS
+from django_database_task.management.commands.run_database_tasks import (
+    Command as RunDatabaseTasks,
+)
 from django_database_task.models import DatabaseTask
 
 from . import tasks as test_tasks
@@ -1280,3 +1284,98 @@ class TestCommandHelp:
         help_text = " ".join(self.format_help("requeue_stale_database_tasks").split())
 
         assert f"default: {DEFAULT_MAX_ATTEMPTS})" in help_text
+
+
+COMMAND_MODULE = "django_database_task.management.commands.run_database_tasks"
+
+# What --workers runs in place of the real command here: a process that exits
+# with the code it is given. test_supervisor.py covers the supervisor itself
+# and tests/postgres/test_workers.py the real workers.
+STUB_WORKER = "import sys; sys.exit(int(sys.argv[1]))"
+
+
+def stub_worker(code):
+    return [sys.executable, "-c", STUB_WORKER, str(code)]
+
+
+@pytest.mark.django_db
+class TestRunDatabaseTasksWorkers:
+    """The --workers option: what the command checks, and what it passes on."""
+
+    def run_workers(self, code=0, **options):
+        out = StringIO()
+        with (
+            patch(f"{COMMAND_MODULE}.worker_arguments", return_value=stub_worker(code)),
+            patch.object(RunDatabaseTasks, "_check_database_supports_workers"),
+        ):
+            call_command("run_database_tasks", stdout=out, stderr=out, **options)
+        return out.getvalue()
+
+    def test_workers_must_be_positive(self):
+        with pytest.raises(CommandError, match="--workers must be at least 1"):
+            call_command("run_database_tasks", workers=0, stdout=StringIO())
+
+    def test_one_worker_is_the_command_itself(self):
+        """The default is the single process the command has always been."""
+        result = simple_task.enqueue(1, 2)
+        out = StringIO()
+
+        call_command("run_database_tasks", workers=1, stdout=out)
+
+        output = out.getvalue()
+        assert "Worker ID:" in output
+        assert "Workers:" not in output
+        assert DatabaseTask.objects.get(id=result.id).status == (
+            TaskResultStatus.SUCCESSFUL
+        )
+
+    @pytest.mark.skipif(
+        connections["default"].vendor != "sqlite",
+        reason="the refusal is for SQLite",
+    )
+    def test_several_workers_are_refused_on_sqlite(self):
+        with (
+            patch(f"{COMMAND_MODULE}.worker_arguments", return_value=stub_worker(0)),
+            pytest.raises(CommandError, match="SQLite"),
+        ):
+            call_command("run_database_tasks", workers=2, stdout=StringIO())
+
+    def test_the_options_are_checked_before_the_workers_start(self):
+        with pytest.raises(CommandError, match="--max-messages must be at least 1"):
+            self.run_workers(workers=2, max_messages=0)
+
+    def test_the_workers_are_the_command_run_again(self):
+        output = self.run_workers(workers=2)
+
+        assert "Workers: 2" in output
+        assert "Worker 1 started" in output
+        assert "Worker 2 started" in output
+        assert "Every worker has exited." in output
+        # The parent supervises; it does not run tasks itself.
+        assert "Worker ID:" not in output
+
+    def test_the_workers_exit_codes_become_the_commands(self):
+        with pytest.raises(SystemExit) as exc_info:
+            self.run_workers(code=4, workers=2, empty_exit_code=4)
+        assert exc_info.value.code == 4
+
+        with pytest.raises(SystemExit) as exc_info:
+            self.run_workers(code=1, workers=2, failed_exit_code=1)
+        assert exc_info.value.code == 1
+
+    def test_a_normal_exit_of_every_worker_exits_normally(self):
+        self.run_workers(code=0, workers=2, empty_exit_code=4, failed_exit_code=1)
+
+    @posix_signals
+    def test_continuous_restarts_the_workers_until_a_signal(self):
+        def stop():
+            time.sleep(1)
+            os.kill(os.getpid(), signal.SIGTERM)
+
+        threading.Thread(target=stop, daemon=True).start()
+        output = self.run_workers(workers=2, continuous=True)
+
+        assert "Workers that exit are restarted." in output
+        assert "; restarting." in output
+        assert "Received SIGTERM: stopping" in output
+        assert "Shutdown complete: every worker exited." in output

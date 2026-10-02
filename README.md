@@ -16,6 +16,7 @@ A database-backed task queue backend for Django's built-in task framework.
 - **Django Admin integration** - View and manage tasks from the admin interface
 - **Async support** - Supports async task functions
 - **Graceful shutdown** - Workers finish the running task before exiting on `SIGTERM`
+- **Parallel workers** - `--workers N` keeps N worker processes running from one command, or run one per systemd unit / Kubernetes replica as before
 - **Crash recovery** - Tasks stranded in `RUNNING` by a killed worker are found and requeued
 - **Monitoring** - Counts per status and the age of the oldest pending task, from Python or `/tasks/status/`
 - **Job scheduler friendly** - Opt-in exit codes that tell an idle run from a failed one, plus structured log fields for JP1 / Hinemos / cron / systemd timers
@@ -258,6 +259,7 @@ python manage.py run_database_tasks [options]
 | `--source` | Where to look for tasks: `auto` (default), `db`, `broker` or `both`. See [Task sources](#task-sources) |
 | `--wait-time` | Seconds to wait for a broker message before looking again (default: 20) |
 | `--max-messages` | Maximum number of broker messages to receive at a time (default: 1) |
+| `--workers` | Number of worker processes to run from this command (default: 1). See [Running several workers](#running-several-workers) |
 | `--shutdown-timeout` | Maximum seconds to wait for the running task after `SIGTERM`/`SIGINT` before forcing exit (0=wait indefinitely, default: 0) |
 | `--no-graceful-shutdown` | Do not install signal handlers (terminate immediately, even while a task is running) |
 | `--empty-exit-code` | Exit with this code when no task was processed (0=exit normally, default: 0) |
@@ -692,6 +694,92 @@ with GracefulShutdown(timeout=50) as shutdown:
 | `process_tasks(..., stop_event=...)` | Stop starting new tasks once the event is set |
 | `is_shutdown_requested()` | True if the active worker was asked to shut down |
 
+## Running several workers
+
+`run_database_tasks` is one process running one task at a time. To run more
+tasks at once, run more of them: every worker claims its own tasks with
+`SELECT FOR UPDATE SKIP LOCKED`, so workers on one host or on many never run
+the same task. There are two ways to keep N of them running.
+
+| | The processes are kept running by | Reach for it when |
+|---|---|---|
+| A process manager | systemd template units, Kubernetes replicas, supervisord `numprocs` | You have one. It restarts, logs and health-checks the workers, and the command's default (one process, with the signals and exit codes described above) is what it expects |
+| `--workers N` | The command itself | One host without a process manager, or one unit or container that should hold N workers: a small supervisor inside the command keeps N worker processes running |
+
+### `--workers N`
+
+```bash
+python manage.py run_database_tasks --continuous --workers 4
+```
+
+The command becomes a supervisor. It starts N copies of itself with
+`--workers` left off and every other option as given, so each worker is
+exactly the single-process worker: its own worker id, its own database
+connection, its own `Worker started` and `Worker finished` log records. The
+supervisor runs no tasks and opens no database connection of its own.
+
+```console
+$ python manage.py run_database_tasks --continuous --workers 2
+Workers: 2
+Worker command: /srv/app/venv/bin/python manage.py run_database_tasks --continuous
+Workers that exit are restarted.
+Worker 1 started (pid 4021).
+Worker 2 started (pid 4022).
+Worker ID: worker-1-3f2a9c11
+Worker ID: worker-1-8b07e4d2
+...
+^C
+Received SIGINT: stopping 2 worker(s). Waiting for them to finish (send the signal again to force exit).
+Received SIGTERM: no new tasks will be started. Waiting for the running task to finish (send the signal again to force exit).
+Received SIGTERM: no new tasks will be started. Waiting for the running task to finish (send the signal again to force exit).
+Worker 1 (pid 4021) exited with code 0.
+Worker 2 (pid 4022) exited with code 0.
+
+Shutdown complete: every worker exited.
+```
+
+- **Restarts.** With `--continuous`, a worker that exits is replaced. One that
+  exits with an error within ten seconds of starting is restarted after a
+  growing delay, from one second up to thirty, so a misconfiguration does not
+  spin. Without `--continuous` each worker drains the queue once and the
+  command exits when all of them have: the run-once shape of
+  [Running from a job scheduler](#running-from-a-job-scheduler), N at a time.
+- **`--max-tasks`** goes to each worker. With `--continuous` that is
+  gunicorn's `max_requests`: a worker exits after that many tasks and is
+  replaced, which bounds a leak in task code.
+- **Signals.** `SIGTERM` and `SIGINT` (Ctrl-Break too on Windows) are handled
+  by the supervisor, which forwards them to every worker and waits for the
+  workers to finish their running task, within `--shutdown-timeout` if one is
+  set. A worker still running past that is killed and the command exits with
+  code 1. A second signal kills the workers at once. The workers are placed in
+  a process group of their own, so a Ctrl-C typed at the terminal reaches only
+  the supervisor. With `--no-graceful-shutdown` the workers are terminated on
+  the first signal, running task or not.
+- **Scaling.** On POSIX, `SIGTTIN` sent to the supervisor starts one more
+  worker and `SIGTTOU` stops the newest one, as with gunicorn. The last worker
+  is never removed.
+- **Exit code.** Decided by the supervisor from what the workers reported:
+  `--failed-exit-code` if any worker exited with it, `--empty-exit-code` if
+  every worker did, a worker's own code if one crashed, and 0 otherwise.
+- **No liveness check.** The supervisor reacts to a worker that exits, not to
+  one that is alive and stuck: from outside, a worker in the middle of a long
+  task and a hung one look the same. A hung worker is what
+  [requeue_stale_database_tasks](#recovering-tasks-left-in-running-status)
+  is for.
+
+What N costs:
+
+- **Polling.** Every worker polls the database every `--interval`, so N
+  workers are N pollers. With the
+  [PostgreSQL LISTEN/NOTIFY](#postgresql-listennotify-integration) broker
+  every worker also wakes on every notification and all but one lose the race
+  for the row, which is fine for a handful of workers and wasteful for dozens.
+- **Connections.** One database connection per worker, plus one `LISTEN`
+  connection per worker with the PostgreSQL broker. Size the connection limit
+  accordingly.
+- **SQLite** has no row locks, so the command refuses `--workers` above 1
+  there. Use PostgreSQL, MySQL or MariaDB.
+
 ## Running from a job scheduler
 
 An on-premise scheduler — JP1, Hinemos, Rundeck, cron, a systemd timer — starts
@@ -881,8 +969,10 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-Run several by templating the unit (`ddt-worker@.service` with `--queue=%i`)
-rather than raising a concurrency setting — each process claims its own tasks.
+Run several by templating the unit (`ddt-worker@.service` with `--queue=%i`),
+or by adding `--workers=N` to `ExecStart` so that one unit holds N worker
+processes; see [Running several workers](#running-several-workers). Either
+way each process claims its own tasks.
 
 See [Graceful Shutdown](#graceful-shutdown) for what happens between `SIGTERM`
 and `TimeoutStopSec`, and

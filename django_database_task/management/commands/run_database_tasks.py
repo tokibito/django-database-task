@@ -6,6 +6,7 @@ import uuid
 from contextlib import ExitStack
 
 from django.core.management.base import BaseCommand, CommandError
+from django.db import connections, router
 from django.tasks import task_backends
 from django.tasks.base import TaskResultStatus
 from django.utils.translation import gettext as _
@@ -15,6 +16,7 @@ from django_database_task.brokers import PullBroker
 from django_database_task.executor import fetch_task, run_task_by_id
 from django_database_task.models import DatabaseTask
 from django_database_task.shutdown import GracefulShutdown, signal_name
+from django_database_task.supervisor import WorkerSupervisor, worker_arguments
 
 #: Where the worker looks for tasks to run.
 SOURCE_AUTO = "auto"
@@ -113,6 +115,18 @@ class Command(BaseCommand):
             ),
         )
         parser.add_argument(
+            "--workers",
+            type=int,
+            default=1,
+            metavar="N",
+            help=_(
+                "Run this many worker processes from one command, each a "
+                "copy of this command without --workers. With --continuous "
+                "a worker that exits is replaced; without it the command "
+                "exits when every worker has (default: 1)"
+            ),
+        )
+        parser.add_argument(
             "--shutdown-timeout",
             type=float,
             default=0.0,
@@ -169,9 +183,17 @@ class Command(BaseCommand):
 
         if max_messages < 1:
             raise CommandError("--max-messages must be at least 1")
+        if options["workers"] < 1:
+            raise CommandError("--workers must be at least 1")
 
         backend = task_backends[backend_name]
         source = self._resolve_source(backend, options["source"])
+
+        if options["workers"] > 1:
+            # The options are checked above so that a mistake is reported
+            # once, here, rather than by every worker.
+            self._supervise(options)
+            return
 
         worker_id = f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
         if verbosity >= 1:
@@ -279,6 +301,56 @@ class Command(BaseCommand):
 
         if exit_code:
             sys.exit(exit_code)
+
+    def _supervise(self, options):
+        """
+        Run ``--workers`` copies of this command and wait for them.
+
+        Each worker is this command run again without ``--workers``, so
+        every other option reaches it unchanged, and it is exactly the
+        single-process worker: its own worker id, its own database
+        connection, its own ``Worker started`` and ``Worker finished``
+        records.
+        """
+        workers = options["workers"]
+        verbosity = options["verbosity"]
+
+        self._check_database_supports_workers(workers)
+
+        supervisor = WorkerSupervisor(
+            worker_arguments(),
+            workers,
+            restart=options["continuous"],
+            graceful=not options["no_graceful_shutdown"],
+            shutdown_timeout=options["shutdown_timeout"],
+            empty_exit_code=options["empty_exit_code"],
+            failed_exit_code=options["failed_exit_code"],
+            stdout=self.stdout,
+            style=self.style,
+            verbosity=verbosity,
+        )
+        exit_code = supervisor.run()
+        if exit_code:
+            sys.exit(exit_code)
+
+    def _check_database_supports_workers(self, workers):
+        """
+        Refuse several workers on SQLite.
+
+        Nothing runs twice there, since a task is claimed with a conditional
+        UPDATE, but SQLite has no row locks: two workers claiming at once
+        both hold the read lock and one is refused the write with "database
+        is locked", which the worker counts as a failed task. The README
+        says SQLite is for development and single-worker deployments; this
+        is where that stops being a note.
+        """
+        alias = router.db_for_write(DatabaseTask)
+        if connections[alias].vendor == "sqlite":
+            raise CommandError(
+                f"--workers {workers} needs a database with row locks, and "
+                f"the {alias!r} database is SQLite. Run one worker, or use "
+                "PostgreSQL, MySQL or MariaDB."
+            )
 
     def _exit_code(self, tasks_processed, empty_exit_code, failed_exit_code):
         """
