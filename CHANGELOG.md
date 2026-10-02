@@ -4,6 +4,11 @@
 
 ### Added
 
+- **`claim_task()` and `run_claimed_task()` on the backend.** The two steps
+  of `DatabaseTaskBackend.run_task()`, which now calls one and then the
+  other, so that a worker can claim a task in the thread that fetched it and
+  run it in another. `run_task()` itself is unchanged, and so is everything
+  that calls it. Existing projects need no changes.
 - **`--workers N` on `run_database_tasks`.** The command keeps N worker
   processes running from one invocation. Each worker is the command run
   again without `--workers`, so every other option reaches it unchanged and
