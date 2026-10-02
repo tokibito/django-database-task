@@ -767,18 +767,64 @@ Shutdown complete: every worker exited.
   [requeue_stale_database_tasks](#recovering-tasks-left-in-running-status)
   is for.
 
-What N costs:
+### Trade-offs
 
+Processes are the simple, robust unit of parallelism, and they are not free.
+What `--workers N` buys and what it costs, so you can pick N with your eyes
+open:
+
+- **Isolation.** Every worker is a process of its own. A task that crashes the
+  interpreter, leaks until the OOM killer steps in, or blocks forever takes
+  one worker with it; the other N-1 keep running, and the supervisor replaces
+  the lost one. Nothing is asked of the task code: it does not have to be
+  thread-safe, release the GIL, or avoid globals.
+- **Memory.** Each worker is a full Django process, so the footprint is N
+  times the resident size of one worker, with no sharing between them (the
+  children are spawned, not forked, so copy-on-write does not help). On a
+  small host that is the limit on N. With `--continuous`, `--max-tasks`
+  bounds a slow leak in task code by recycling a worker after that many
+  tasks, in place of a memory limit.
+- **CPU.** N processes are N interpreters, each with its own GIL, so
+  CPU-bound tasks scale across cores. Past the number of cores more workers
+  only add context switching; for I/O-bound tasks, more than the core count
+  is fine and the limit is memory and connections.
 - **Polling.** Every worker polls the database every `--interval`, so N
-  workers are N pollers. With the
+  workers are N pollers; lengthen `--interval` as N grows if the idle load
+  shows. With the
   [PostgreSQL LISTEN/NOTIFY](#postgresql-listennotify-integration) broker
   every worker also wakes on every notification and all but one lose the race
   for the row, which is fine for a handful of workers and wasteful for dozens.
 - **Connections.** One database connection per worker, plus one `LISTEN`
-  connection per worker with the PostgreSQL broker. Size the connection limit
-  accordingly.
+  connection per worker with the PostgreSQL broker. Count them against
+  `max_connections` or your pooler alongside the web processes.
+- **Stability of the supervisor itself.** It is a single process that does
+  very little (no database connection, no task code), so it is unlikely to
+  fail, but it is not supervised by anything unless you run it under a
+  process manager, and that is the recommended way to run it. If it is killed
+  outright (`SIGKILL`, a crash of the host), the workers are not: they are in
+  a process group of their own and finish their running task, then keep
+  polling until something stops them. Under systemd the default
+  `KillMode=control-group` tears down the whole group with the unit, and in a
+  container the workers die with PID 1, so in both places this is a
+  non-issue; from a bare shell, kill the stragglers by hand. Tasks a hard
+  kill left in `RUNNING` are picked up by
+  [requeue_stale_database_tasks](#recovering-tasks-left-in-running-status)
+  either way.
+- **What a process manager still does better.** Per-worker health checks and
+  resource limits, log routing per unit, restart policies richer than
+  "replace it, back off if it keeps dying", and rolling restarts. `--workers`
+  is deliberately not a replacement for those; it is the convenience of N
+  workers from one command line. Combining the two, one unit or one container
+  running `--workers N`, is a reasonable middle: the manager handles the
+  machine-level concerns and the supervisor the fan-out.
 - **SQLite** has no row locks, so the command refuses `--workers` above 1
   there. Use PostgreSQL, MySQL or MariaDB.
+
+Threads inside a worker, the memory-lean option for I/O-bound tasks that are
+written thread-safe, are not part of this release; the design is tracked in
+[#25](https://github.com/tokibito/django-database-task/issues/25). On this
+backend they would save memory but not database connections, since each
+thread needs a connection of its own.
 
 ## Running from a job scheduler
 

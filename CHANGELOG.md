@@ -21,7 +21,10 @@
   deliberately small: no liveness check, since a stuck worker is what
   `requeue_stale_database_tasks` is for. It refuses more than one worker on
   SQLite, which has no row locks. The README's new *Running several workers*
-  section sets it beside systemd, Kubernetes and supervisord. The default is
+  section sets it beside systemd, Kubernetes and supervisord and spells out
+  the trade-offs: isolation, memory, CPU, polling load, connections, what
+  happens to the workers if the supervisor itself is killed, and what a
+  process manager still does better. The default is
   1, the single process the command has always been, so existing projects
   need no changes.
   ([#25](https://github.com/tokibito/django-database-task/issues/25))
