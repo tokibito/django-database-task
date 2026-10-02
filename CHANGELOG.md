@@ -17,7 +17,9 @@
   across the threads, and on `SIGTERM` the tasks in the threads finish
   before the worker exits. The task code must be thread-safe, and the option
   only helps I/O-bound tasks; the README's *`--threads M`* and *Trade-offs*
-  sections say what it saves (memory, not connections) and what it costs.
+  sections say what it saves (memory, not connections) and what it costs,
+  and the section opens with the advice to prefer processes unless memory
+  is the constraint.
   Several threads are refused on SQLite, as several workers are. The default
   is 1, with the loop unchanged, so existing projects need no changes.
   ([#25](https://github.com/tokibito/django-database-task/issues/25))
