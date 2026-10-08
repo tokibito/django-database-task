@@ -53,6 +53,17 @@
   need no changes.
   ([#25](https://github.com/tokibito/django-database-task/issues/25))
 
+### Fixed
+
+- `purge_completed_database_tasks` treated a negative `--days` like
+  `--days 0` and deleted every completed task, while
+  `purge_completed_tasks()` and the purge endpoint refuse a negative value.
+  The command now refuses it with a `CommandError` before it counts or
+  deletes anything. `--days 0`, positive values and the default are
+  unchanged, so existing projects need no changes; only an invocation with a
+  negative `--days` now fails instead of deleting the whole history.
+  ([#69](https://github.com/tokibito/django-database-task/issues/69))
+
 ## 0.6.0
 
 ### Added

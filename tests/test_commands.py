@@ -535,6 +535,18 @@ class TestPurgeCompletedDatabaseTasks:
 
         assert DatabaseTask.objects.count() == 0
 
+    def test_purge_refuses_negative_days(self):
+        """A negative --days is refused before anything is counted or deleted."""
+        simple_task.enqueue(1, 1)
+        call_command("run_database_tasks", stdout=StringIO())
+
+        out = StringIO()
+        with pytest.raises(CommandError, match="--days must not be negative, got -1"):
+            call_command("purge_completed_database_tasks", days=-1, stdout=out)
+
+        assert DatabaseTask.objects.count() == 1
+        assert out.getvalue() == ""
+
     def test_purge_keeps_recent_tasks(self):
         """Recent tasks are not deleted."""
         simple_task.enqueue(1, 1)

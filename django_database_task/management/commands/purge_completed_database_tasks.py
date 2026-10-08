@@ -1,4 +1,4 @@
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.utils.translation import gettext as _
 
 from django_database_task.executor import (
@@ -52,6 +52,9 @@ class Command(BaseCommand):
         task_path = options["task_path"]
         batch_size = options["batch_size"]
         dry_run = options["dry_run"]
+
+        if days < 0:
+            raise CommandError(f"--days must not be negative, got {days}")
 
         statuses = _parse_purge_statuses(status_str)
 

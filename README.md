@@ -328,7 +328,7 @@ python manage.py purge_completed_database_tasks [options]
 
 | Option | Description |
 |--------|-------------|
-| `--days` | Delete tasks completed more than N days ago (0=all) |
+| `--days` | Delete tasks completed more than N days ago (0=all). A negative value is refused |
 | `--status` | Target statuses, comma-separated (default: "SUCCESSFUL,FAILED") |
 | `--task-path` | Only delete tasks with this task path, matched exactly (default: all tasks) |
 | `--batch-size` | Number of tasks to delete at once (default: 1000) |
@@ -337,8 +337,8 @@ python manage.py purge_completed_database_tasks [options]
 The same purge is available as `purge_completed_tasks()` (see
 [Programmatic API](#programmatic-api)), for a project that purges from its own
 code. Its defaults differ from the command's: it purges the `default`
-backend's tasks only and keeps the last 7 days, and it raises `ValueError` for
-a negative `days`.
+backend's tasks only and keeps the last 7 days. Like the command, it refuses a
+negative `days`, raising `ValueError`.
 
 ### requeue_stale_database_tasks
 
