@@ -18,7 +18,11 @@ from django_database_task.brokers import PullBroker
 from django_database_task.executor import fetch_task, run_task_by_id
 from django_database_task.models import DatabaseTask
 from django_database_task.shutdown import GracefulShutdown, signal_name
-from django_database_task.supervisor import WorkerSupervisor, worker_arguments
+from django_database_task.supervisor import (
+    WorkerSupervisor,
+    worker_arguments,
+    worker_log_fields,
+)
 from django_database_task.threads import ExecutorThreads
 
 #: Where the worker looks for tasks to run.
@@ -266,6 +270,7 @@ class Command(BaseCommand):
                 "queue_name": queue_name,
                 "continuous": continuous,
                 "threads": threads,
+                **worker_log_fields(),
             },
         )
 
@@ -330,6 +335,7 @@ class Command(BaseCommand):
                 "tasks_processed": tasks_processed,
                 "tasks_failed": self.tasks_failed,
                 "exit_code": exit_code,
+                **worker_log_fields(),
             },
         )
 
@@ -730,6 +736,7 @@ class Command(BaseCommand):
                     "backend_alias": backend_name,
                     "queue_name": queue_name,
                     "broker": type(broker).__name__,
+                    **worker_log_fields(),
                 },
             )
             self.stdout.write(self.style.ERROR(f"\nError receiving from broker: {e}"))
@@ -816,7 +823,11 @@ class Command(BaseCommand):
         except Exception:
             db_task = None
         if db_task is None:
-            return {"worker_id": worker_id, "task_id": str(message.task_id)}
+            return {
+                "worker_id": worker_id,
+                "task_id": str(message.task_id),
+                **worker_log_fields(),
+            }
         return task_log_fields(db_task, worker_id)
 
     def _report_result(self, status, verbosity):

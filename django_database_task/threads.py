@@ -26,6 +26,8 @@ import threading
 
 from django.db import close_old_connections, connections
 
+from django_database_task.supervisor import worker_log_fields
+
 logger = logging.getLogger("django_database_task")
 
 
@@ -145,7 +147,10 @@ class ExecutorThreads:
                     logger.exception(
                         "Executor thread %s failed",
                         self.worker_ids[index],
-                        extra={"worker_id": self.worker_ids[index]},
+                        extra={
+                            "worker_id": self.worker_ids[index],
+                            **worker_log_fields(),
+                        },
                     )
                     outcome = None
                 finally:

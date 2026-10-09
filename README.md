@@ -769,6 +769,16 @@ Shutdown complete: every worker exited.
 - **Exit code.** Decided by the supervisor from what the workers reported:
   `--failed-exit-code` if any worker exited with it, `--empty-exit-code` if
   every worker did, a worker's own code if one crashed, and 0 otherwise.
+- **Logs.** The supervisor's records (`Worker process started`,
+  `Worker process exited`, `Worker process killed`) carry the worker's
+  `worker_index` and `pid`, and every record a worker writes carries the same
+  two fields next to its `worker_id`, so the two sides join on `pid`: the
+  `Worker started` that belongs to a `Worker process exited` with a nonzero
+  code is the one with the same `pid`. A restarted worker keeps its slot's
+  `worker_index` and gets a new `pid`. The index reaches the worker in the
+  `DJANGO_DATABASE_TASK_WORKER_INDEX` environment variable; a worker started
+  without the supervisor records no index. See
+  [Structured logging](#structured-logging).
 - **No liveness check.** The supervisor reacts to a worker that exits, not to
   one that is alive and stuck: from outside, a worker in the middle of a long
   task and a hung one look the same. A hung worker is what
@@ -1126,13 +1136,16 @@ Every task record carries:
 | `priority` | Priority it was enqueued with |
 | `backend_alias` | Key in the `TASKS` setting |
 | `worker_id` | `hostname-xxxxxxxx` of the worker that ran it |
+| `pid` | Process id of the process that logged it |
+| `worker_index` | Under `--workers`, the slot the supervisor started the worker in; absent otherwise |
 
 Completed runs add `status` (`SUCCESSFUL` or `FAILED`) and `duration_ms`, and
 failures add `error_class`. The worker's own start and finish records, and the
 record for a receive from the broker that failed, carry `worker_id`,
-`backend_alias`, `queue_name`, and — on finish — `tasks_processed`,
-`tasks_failed`, and `exit_code`, which is the same code the process exits with.
-The failed receive also carries `broker`, the class name of the broker.
+`backend_alias`, `queue_name`, `pid`, `worker_index` under `--workers`, and —
+on finish — `tasks_processed`, `tasks_failed`, and `exit_code`, which is the
+same code the process exits with. The failed receive also carries `broker`,
+the class name of the broker.
 
 | Message | Level | When |
 |---------|-------|------|

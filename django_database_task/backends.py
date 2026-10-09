@@ -18,6 +18,8 @@ from django.utils import timezone
 from django.utils.json import normalize_json
 from django.utils.module_loading import import_string
 
+from django_database_task.supervisor import worker_log_fields
+
 logger = logging.getLogger("django_database_task")
 
 
@@ -27,7 +29,8 @@ def task_log_fields(db_task, worker_id=None, **extra):
 
     These are the fields an operator filters on once the records go through
     a structured (JSON) formatter, so they are kept flat and named apart
-    from LogRecord's own attributes.
+    from LogRecord's own attributes. ``pid`` and, under ``--workers``,
+    ``worker_index`` join them with the supervisor's records.
     """
     fields = {
         "task_id": str(db_task.id),
@@ -36,6 +39,7 @@ def task_log_fields(db_task, worker_id=None, **extra):
         "priority": db_task.priority,
         "backend_alias": db_task.backend_name,
         "worker_id": worker_id,
+        **worker_log_fields(),
     }
     fields.update(extra)
     return fields

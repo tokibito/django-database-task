@@ -26,6 +26,7 @@ django-tasks-redis can ship the same one.
 """
 
 import logging
+import os
 import signal
 import subprocess
 import sys
@@ -57,6 +58,28 @@ RESTART_BACKOFF_MAX = 30.0
 #: force their own exit when it expires, so this is a backstop, and giving
 #: them a moment past it lets their own report of the timeout come out.
 SHUTDOWN_GRACE = 1.0
+#: The environment variable a worker finds its slot's index in. The
+#: supervisor knows a child's pid but not the worker id the child picks for
+#: itself, so the worker puts the index and its own pid on its log records
+#: (see :func:`worker_log_fields`) under the names the supervisor uses.
+WORKER_INDEX_ENV = "DJANGO_DATABASE_TASK_WORKER_INDEX"
+
+
+def worker_log_fields():
+    """
+    The fields that join a worker's log records with its supervisor's.
+
+    ``pid`` is this process's, the same value the supervisor's ``Worker
+    process started`` and ``Worker process exited`` records carry for it.
+    ``worker_index`` is the slot the supervisor started it in, and is left
+    out when the process was not started by one.
+    """
+    fields = {"pid": os.getpid()}
+    try:
+        fields["worker_index"] = int(os.environ[WORKER_INDEX_ENV])
+    except (KeyError, ValueError):
+        pass
+    return fields
 
 
 def strip_option(args, name):
@@ -372,7 +395,8 @@ class WorkerSupervisor:
             kwargs = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
         else:
             kwargs = {"process_group": 0}
-        worker.process = subprocess.Popen(self.args, **kwargs)
+        env = {**os.environ, WORKER_INDEX_ENV: str(worker.index)}
+        worker.process = subprocess.Popen(self.args, env=env, **kwargs)
         worker.pid = worker.process.pid
         worker.started_at = time.monotonic()
         worker.restart_at = None

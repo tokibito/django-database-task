@@ -6,6 +6,7 @@ attributes on the record rather than only inside the message text.
 """
 
 import logging
+import os
 from io import StringIO
 from unittest.mock import patch
 
@@ -16,6 +17,7 @@ from django.tasks.base import TaskResultStatus
 from django_database_task.backends import DatabaseTaskBackend, task_log_fields
 from django_database_task.brokers import BrokerMessage
 from django_database_task.models import DatabaseTask
+from django_database_task.supervisor import WORKER_INDEX_ENV
 
 from .tasks import failing_task, simple_task
 from .test_commands import FakePullBroker, make_backend, run_worker
@@ -36,7 +38,8 @@ def records_matching(caplog, fragment):
 
 @pytest.mark.django_db
 class TestTaskLogFields:
-    def test_fields_describe_the_task(self):
+    def test_fields_describe_the_task(self, monkeypatch):
+        monkeypatch.delenv(WORKER_INDEX_ENV, raising=False)
         result = simple_task.enqueue(1, 2)
         db_task = DatabaseTask.objects.get(id=result.id)
 
@@ -49,7 +52,34 @@ class TestTaskLogFields:
             "priority": db_task.priority,
             "backend_alias": db_task.backend_name,
             "worker_id": "host-abc",
+            "pid": os.getpid(),
         }
+
+    def test_fields_carry_the_supervisors_worker_index(self, monkeypatch):
+        monkeypatch.setenv(WORKER_INDEX_ENV, "3")
+        result = simple_task.enqueue(1, 2)
+        db_task = DatabaseTask.objects.get(id=result.id)
+
+        fields = task_log_fields(db_task, worker_id="host-abc")
+
+        assert fields["worker_index"] == 3
+        assert fields["pid"] == os.getpid()
+
+    def test_an_unreadable_worker_index_is_left_out(self, monkeypatch):
+        monkeypatch.setenv(WORKER_INDEX_ENV, "not-a-number")
+        result = simple_task.enqueue(1, 2)
+        db_task = DatabaseTask.objects.get(id=result.id)
+
+        assert "worker_index" not in task_log_fields(db_task)
+
+    def test_the_join_fields_shadow_no_logrecord_attribute(self, monkeypatch):
+        monkeypatch.setenv(WORKER_INDEX_ENV, "1")
+        result = simple_task.enqueue(1, 2)
+        db_task = DatabaseTask.objects.get(id=result.id)
+
+        reserved = vars(logging.LogRecord("n", logging.INFO, "p", 1, "m", None, None))
+
+        assert not set(task_log_fields(db_task)) & set(reserved)
 
     def test_task_id_is_a_string(self):
         """A UUID would not survive a JSON formatter unhelped."""
@@ -193,6 +223,18 @@ class TestTaskLifecycleLogging:
         assert record.worker_id == started.worker_id
         assert broker.nacked == ["not-a-uuid"]
 
+    def test_a_broker_message_whose_task_cannot_be_read_keeps_the_join_fields(
+        self, task_logs, monkeypatch
+    ):
+        monkeypatch.setenv(WORKER_INDEX_ENV, "5")
+        broker = FakePullBroker(batches=[[BrokerMessage("not-a-uuid")]])
+
+        run_worker(make_backend(broker), source="broker")
+
+        (record,) = records_matching(task_logs, "Worker could not run task from")
+        assert record.worker_index == 5
+        assert record.pid == os.getpid()
+
     def test_a_task_that_could_not_be_started_is_logged(self, task_logs):
         """The task function no longer imports; the task is FAILED unrun."""
         result = simple_task.enqueue(1, 2)
@@ -260,3 +302,40 @@ class TestWorkerLifecycleLogging:
 
         (record,) = records_matching(task_logs, "Worker finished")
         assert record.exit_code == 0
+
+    def test_worker_records_carry_the_pid_and_worker_index(
+        self, task_logs, monkeypatch
+    ):
+        """What a supervisor's ``Worker process started`` record joins on."""
+        monkeypatch.setenv(WORKER_INDEX_ENV, "2")
+        simple_task.enqueue(1, 2)
+
+        call_command("run_database_tasks", stdout=StringIO())
+
+        for message in ("Worker started", "Task completed", "Worker finished"):
+            (record,) = records_matching(task_logs, message)
+            assert record.pid == os.getpid(), message
+            assert record.worker_index == 2, message
+
+    def test_a_worker_without_a_supervisor_records_no_index(
+        self, task_logs, monkeypatch
+    ):
+        monkeypatch.delenv(WORKER_INDEX_ENV, raising=False)
+
+        call_command("run_database_tasks", stdout=StringIO())
+
+        (record,) = records_matching(task_logs, "Worker started")
+        assert record.pid == os.getpid()
+        assert not hasattr(record, "worker_index")
+
+    def test_a_failed_receive_carries_the_worker_index(self, task_logs, monkeypatch):
+        class BrokenBroker(FakePullBroker):
+            def receive(self, queue_name=None, max_messages=1, wait_seconds=20):
+                raise RuntimeError("broker is down")
+
+        monkeypatch.setenv(WORKER_INDEX_ENV, "4")
+        run_worker(make_backend(BrokenBroker()), source="broker")
+
+        (record,) = records_matching(task_logs, "Error receiving from broker")
+        assert record.worker_index == 4
+        assert record.pid == os.getpid()
