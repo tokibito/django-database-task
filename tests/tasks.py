@@ -136,3 +136,20 @@ def barrier_task():
 
     tasks.barrier.wait()
     return "met"
+
+
+@task(priority=10)
+def set_environ_task(name, value):
+    """Task that changes an environment variable of the worker running it."""
+    import os
+
+    os.environ[name] = value
+    return os.environ.get(name)
+
+
+@task
+def read_environ_task(name):
+    """Task that returns an environment variable as the worker sees it."""
+    import os
+
+    return os.environ.get(name)

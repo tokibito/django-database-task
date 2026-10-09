@@ -27,8 +27,10 @@ import pytest
 
 from django_database_task.shutdown import FORCED_EXIT_CODE
 from django_database_task.supervisor import (
+    WORKER_INDEX_ENV,
     WorkerSupervisor,
     combine_exit_codes,
+    read_worker_index,
     strip_option,
     worker_arguments,
 )
@@ -85,6 +87,16 @@ EXITING_WORKER = (
     PRELUDE
     + """
 mark(ready)
+sys.exit(int(sys.argv[3]))
+"""
+)
+
+# Writes the slot index the supervisor gave it into its ready file.
+INDEX_WORKER = (
+    PRELUDE
+    + f"""
+with open(os.path.join(ready, str(os.getpid())), "w") as f:
+    f.write(os.environ.get("{WORKER_INDEX_ENV}", ""))
 sys.exit(int(sys.argv[3]))
 """
 )
@@ -211,6 +223,26 @@ class TestCombineExitCodes:
         assert combine_exit_codes(codes, empty, failed) == expected
 
 
+class TestReadWorkerIndex:
+    @pytest.mark.parametrize(
+        "value, expected", [("1", 1), ("12", 12), ("01", 1), (None, None)]
+    )
+    def test_reads_a_whole_number_of_one_or_more(self, value, expected):
+        environ = {} if value is None else {WORKER_INDEX_ENV: value}
+        assert read_worker_index(environ) == expected
+
+    @pytest.mark.parametrize(
+        "value", ["", "0", "-1", "+3", " 3", "1_0", "3.0", "abc", "\u0663"]
+    )
+    def test_refuses_anything_else(self, value):
+        with pytest.raises(ValueError, match=WORKER_INDEX_ENV):
+            read_worker_index({WORKER_INDEX_ENV: value})
+
+    def test_reads_the_process_environment_by_default(self, monkeypatch):
+        monkeypatch.setenv(WORKER_INDEX_ENV, "5")
+        assert read_worker_index() == 5
+
+
 class TestSupervisorRunOnce:
     def test_rejects_less_than_one_worker(self):
         with pytest.raises(ValueError):
@@ -308,6 +340,50 @@ class TestSupervisorRestart:
             if record.getMessage().startswith("Worker process exited")
         ]
         assert delays[:2] == [0.0, 0.0]
+
+
+class TestSupervisorJoinsTheWorkersLogs:
+    def started_records(self, caplog):
+        return {
+            record.pid: record.worker_index
+            for record in caplog.records
+            if record.getMessage().startswith("Worker process started")
+        }
+
+    def indexes_seen_by_workers(self, harness):
+        return {
+            int(name): (harness.ready / name).read_text()
+            for name in os.listdir(harness.ready)
+        }
+
+    def test_each_worker_is_told_its_index(self, tmp_path, caplog):
+        harness = Harness(tmp_path, INDEX_WORKER, 0, workers=3, restart=False)
+        with caplog.at_level(logging.INFO, logger="django_database_task"):
+            harness.start().join()
+
+        started = self.started_records(caplog)
+        seen = self.indexes_seen_by_workers(harness)
+        assert sorted(started.values()) == [1, 2, 3]
+        assert seen == {pid: str(index) for pid, index in started.items()}
+
+    def test_a_restarted_worker_keeps_its_slots_index(self, tmp_path, caplog):
+        harness = Harness(tmp_path, INDEX_WORKER, 0, workers=1, restart=True)
+        with caplog.at_level(logging.INFO, logger="django_database_task"):
+            harness.start()
+            harness.wait_exits(2)
+            harness.supervisor.request_shutdown()
+            harness.join()
+
+        seen = self.indexes_seen_by_workers(harness)
+        assert len(seen) >= 2
+        assert set(seen.values()) == {"1"}
+
+    def test_the_supervisors_own_environment_is_left_alone(self, tmp_path, monkeypatch):
+        monkeypatch.delenv(WORKER_INDEX_ENV, raising=False)
+        harness = Harness(tmp_path, INDEX_WORKER, 0, workers=2, restart=False)
+        harness.start().join()
+
+        assert WORKER_INDEX_ENV not in os.environ
 
 
 class TestSupervisorShutdown:

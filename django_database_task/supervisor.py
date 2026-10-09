@@ -26,6 +26,7 @@ django-tasks-redis can ship the same one.
 """
 
 import logging
+import os
 import signal
 import subprocess
 import sys
@@ -57,6 +58,63 @@ RESTART_BACKOFF_MAX = 30.0
 #: force their own exit when it expires, so this is a backstop, and giving
 #: them a moment past it lets their own report of the timeout come out.
 SHUTDOWN_GRACE = 1.0
+#: The environment variable a worker finds its index in. The supervisor
+#: knows a child's pid but not the worker id the child picks for itself, so
+#: the worker puts the index and its own pid on its log records (see
+#: :func:`worker_log_fields`) under the names the supervisor uses. The
+#: supervisor sets it for each child; a process manager that starts the
+#: workers itself (a systemd template unit, say) can set it the same way.
+WORKER_INDEX_ENV = "DJANGO_DATABASE_TASK_WORKER_INDEX"
+
+#: The index this process records, set once when the worker starts.
+_worker_index = None
+
+
+def read_worker_index(environ=None):
+    """
+    The worker index in ``environ`` (``os.environ`` by default).
+
+    Returns:
+        The index, or None when the variable is unset. A value that is not
+        a whole number of 1 or more in ASCII digits raises ValueError:
+        ``int()`` alone would take ``-1``, ``1_0`` or non-ASCII digits.
+    """
+    value = (os.environ if environ is None else environ).get(WORKER_INDEX_ENV)
+    if value is None:
+        return None
+    if not (value.isascii() and value.isdigit() and int(value) >= 1):
+        raise ValueError(
+            f"{WORKER_INDEX_ENV} must be a whole number of 1 or more, not {value!r}"
+        )
+    return int(value)
+
+
+def set_worker_index(index):
+    """
+    Fix the index :func:`worker_log_fields` reports for this process.
+
+    The worker calls it once at startup, so that task code changing the
+    environment afterwards does not change what the records say. The
+    variable itself is left in the environment for anything the tasks
+    start to read.
+    """
+    global _worker_index
+    _worker_index = index
+
+
+def worker_log_fields():
+    """
+    The fields that join a worker's log records with its supervisor's.
+
+    ``pid`` is this process's, the same value the supervisor's ``Worker
+    process started`` and ``Worker process exited`` records carry for it.
+    ``worker_index`` is the one the worker read at startup, and is left out
+    when it had none.
+    """
+    fields = {"pid": os.getpid()}
+    if _worker_index is not None:
+        fields["worker_index"] = _worker_index
+    return fields
 
 
 def strip_option(args, name):
@@ -372,7 +430,8 @@ class WorkerSupervisor:
             kwargs = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
         else:
             kwargs = {"process_group": 0}
-        worker.process = subprocess.Popen(self.args, **kwargs)
+        env = {**os.environ, WORKER_INDEX_ENV: str(worker.index)}
+        worker.process = subprocess.Popen(self.args, env=env, **kwargs)
         worker.pid = worker.process.pid
         worker.started_at = time.monotonic()
         worker.restart_at = None

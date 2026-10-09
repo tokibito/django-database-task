@@ -769,6 +769,15 @@ Shutdown complete: every worker exited.
 - **Exit code.** Decided by the supervisor from what the workers reported:
   `--failed-exit-code` if any worker exited with it, `--empty-exit-code` if
   every worker did, a worker's own code if one crashed, and 0 otherwise.
+- **Logs.** The supervisor's records (`Worker process started`,
+  `Worker process exited`, `Worker process killed`) carry the worker's
+  `worker_index` and `pid`, and every record a worker writes carries the same
+  two fields next to its `worker_id`, so the two sides join on `pid`: the
+  `Worker started` that belongs to a `Worker process exited` with a nonzero
+  code is the one with the same `pid`. A restarted worker keeps its slot's
+  `worker_index` and gets a new `pid`. The index reaches the worker in the
+  `DJANGO_DATABASE_TASK_WORKER_INDEX` environment variable; see
+  [Worker index](#worker-index).
 - **No liveness check.** The supervisor reacts to a worker that exits, not to
   one that is alive and stuck: from outside, a worker in the middle of a long
   task and a hung one look the same. A hung worker is what
@@ -1126,13 +1135,53 @@ Every task record carries:
 | `priority` | Priority it was enqueued with |
 | `backend_alias` | Key in the `TASKS` setting |
 | `worker_id` | `hostname-xxxxxxxx` of the worker that ran it |
+| `pid` | Process id of the process that logged it |
+| `worker_index` | The worker's index (see [Worker index](#worker-index)); absent when it has none |
 
 Completed runs add `status` (`SUCCESSFUL` or `FAILED`) and `duration_ms`, and
 failures add `error_class`. The worker's own start and finish records, and the
 record for a receive from the broker that failed, carry `worker_id`,
-`backend_alias`, `queue_name`, and — on finish — `tasks_processed`,
-`tasks_failed`, and `exit_code`, which is the same code the process exits with.
-The failed receive also carries `broker`, the class name of the broker.
+`backend_alias`, `queue_name`, `pid`, `worker_index` when there is one, and —
+on finish — `tasks_processed`, `tasks_failed`, and `exit_code`, which is the
+same code the process exits with. The failed receive also carries `broker`,
+the class name of the broker.
+
+#### Worker index
+
+A worker reads its index from the `DJANGO_DATABASE_TASK_WORKER_INDEX`
+environment variable when it starts and puts it on every record it writes as
+`worker_index`, an integer, next to its own `pid`. Under `--workers` the
+supervisor sets the variable for each worker to the slot it started it in,
+the same `worker_index` its own `Worker process started` and
+`Worker process exited` records carry, so the two sides of one host's logs
+join on `pid`. A process manager that starts the workers itself can set the
+variable the same way, so that "worker 2" names the same unit in every
+restart's records. With a systemd template unit:
+
+```ini
+# /etc/systemd/system/ddt-worker@.service
+[Service]
+User=app
+WorkingDirectory=/srv/app
+Environment=DJANGO_SETTINGS_MODULE=myproject.settings
+Environment=DJANGO_DATABASE_TASK_WORKER_INDEX=%i
+ExecStart=/srv/app/venv/bin/python manage.py run_database_tasks --continuous
+Restart=always
+```
+
+```bash
+systemctl enable --now ddt-worker@1 ddt-worker@2
+```
+
+- The value must be a whole number of 1 or more, in ASCII digits. Anything
+  else (`0`, `-1`, `+3`, a name) is reported with an `Ignoring the worker
+  index` WARNING and on stdout, and the worker runs without an index; it is
+  not refused, since the index only labels the records.
+- It is read once, at startup. A task that changes the variable does not
+  change what the worker's records say.
+- The variable stays in the environment, so a task, and anything it starts,
+  can read which worker it runs in.
+- Without the variable a worker records its `pid` and no `worker_index`.
 
 | Message | Level | When |
 |---------|-------|------|

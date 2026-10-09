@@ -18,7 +18,13 @@ from django_database_task.brokers import PullBroker
 from django_database_task.executor import fetch_task, run_task_by_id
 from django_database_task.models import DatabaseTask
 from django_database_task.shutdown import GracefulShutdown, signal_name
-from django_database_task.supervisor import WorkerSupervisor, worker_arguments
+from django_database_task.supervisor import (
+    WorkerSupervisor,
+    read_worker_index,
+    set_worker_index,
+    worker_arguments,
+    worker_log_fields,
+)
 from django_database_task.threads import ExecutorThreads
 
 #: Where the worker looks for tasks to run.
@@ -219,8 +225,11 @@ class Command(BaseCommand):
             return
 
         worker_id = f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
+        worker_index = self._read_worker_index()
         if verbosity >= 1:
             self.stdout.write(f"Worker ID: {worker_id}")
+            if worker_index is not None:
+                self.stdout.write(f"Worker index: {worker_index}")
             self.stdout.write(f"Backend: {backend_name}")
             self.stdout.write(f"Source: {source}")
             if threads > 1:
@@ -266,6 +275,7 @@ class Command(BaseCommand):
                 "queue_name": queue_name,
                 "continuous": continuous,
                 "threads": threads,
+                **worker_log_fields(),
             },
         )
 
@@ -330,11 +340,29 @@ class Command(BaseCommand):
                 "tasks_processed": tasks_processed,
                 "tasks_failed": self.tasks_failed,
                 "exit_code": exit_code,
+                **worker_log_fields(),
             },
         )
 
         if exit_code:
             sys.exit(exit_code)
+
+    def _read_worker_index(self):
+        """
+        Read the worker index once, for every record this worker writes.
+
+        A value that is not an index is reported and ignored rather than
+        refused: it only labels the log records, and a worker that will
+        not start over a label is worse than one that runs without it.
+        """
+        try:
+            index = read_worker_index()
+        except ValueError as e:
+            index = None
+            logger.warning("Ignoring the worker index: %s", e)
+            self.stdout.write(self.style.WARNING(f"Ignoring the worker index: {e}"))
+        set_worker_index(index)
+        return index
 
     def _supervise(self, options):
         """
@@ -730,6 +758,7 @@ class Command(BaseCommand):
                     "backend_alias": backend_name,
                     "queue_name": queue_name,
                     "broker": type(broker).__name__,
+                    **worker_log_fields(),
                 },
             )
             self.stdout.write(self.style.ERROR(f"\nError receiving from broker: {e}"))
@@ -816,7 +845,11 @@ class Command(BaseCommand):
         except Exception:
             db_task = None
         if db_task is None:
-            return {"worker_id": worker_id, "task_id": str(message.task_id)}
+            return {
+                "worker_id": worker_id,
+                "task_id": str(message.task_id),
+                **worker_log_fields(),
+            }
         return task_log_fields(db_task, worker_id)
 
     def _report_result(self, status, verbosity):
