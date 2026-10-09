@@ -749,9 +749,18 @@ Shutdown complete: every worker exited.
 - **Restarts.** With `--continuous`, a worker that exits is replaced. One that
   exits with an error within ten seconds of starting is restarted after a
   growing delay, from one second up to thirty, so a misconfiguration does not
-  spin. Without `--continuous` each worker drains the queue once and the
-  command exits when all of them have: the run-once shape of
-  [Running from a job scheduler](#running-from-a-job-scheduler), N at a time.
+  spin. When every worker is failing that way at once, which points at the
+  configuration or a dependency that is down rather than at one bad worker,
+  the supervisor logs one `Every worker is failing to start` WARNING, with
+  `workers` and the last `exit_codes`, and a `Workers recovered` INFO, with
+  `worker_index`, `pid` and `failing_for` in seconds, once a worker has run
+  past the ten seconds again. `Supervisor finished` carries `restarts`, how
+  many workers were started in place of one that exited, and
+  `abnormal_restarts`, how many of those followed an exit with a code other
+  than 0 or `--empty-exit-code`. Without `--continuous` each worker drains the
+  queue once and the command exits when all of them have: the run-once shape
+  of [Running from a job scheduler](#running-from-a-job-scheduler), N at a
+  time.
 - **`--max-tasks`** goes to each worker. With `--continuous` that is
   gunicorn's `max_requests`: a worker exits after that many tasks and is
   replaced, which bounds a leak in task code.

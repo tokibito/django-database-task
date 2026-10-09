@@ -4,6 +4,16 @@
 
 ### Added
 
+- **A summary of the `--workers` supervisor's state in its log records.**
+  When every worker is failing within the stable window at once, the
+  supervisor logs one `Every worker is failing to start` WARNING, since that
+  is a misconfiguration or a dependency being down rather than one bad
+  worker, and a `Workers recovered` INFO once a worker runs past the window
+  again. `Supervisor finished` gains `restarts` and `abnormal_restarts` next
+  to the `exit_codes` it already lists. Added records and fields only: no
+  logger name, message, existing field or stdout output changes, so existing
+  projects need no changes.
+  ([#65](https://github.com/tokibito/django-database-task/issues/65))
 - **`pid` and `worker_index` on the worker's log records.** A worker reads
   its index once at startup from the `DJANGO_DATABASE_TASK_WORKER_INDEX`
   environment variable, a whole number of 1 or more, and adds it and its own
