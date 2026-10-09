@@ -30,6 +30,7 @@ from django_database_task.supervisor import (
     WORKER_INDEX_ENV,
     WorkerSupervisor,
     combine_exit_codes,
+    read_worker_index,
     strip_option,
     worker_arguments,
 )
@@ -220,6 +221,26 @@ class TestCombineExitCodes:
     )
     def test_precedence(self, codes, empty, failed, expected):
         assert combine_exit_codes(codes, empty, failed) == expected
+
+
+class TestReadWorkerIndex:
+    @pytest.mark.parametrize(
+        "value, expected", [("1", 1), ("12", 12), ("01", 1), (None, None)]
+    )
+    def test_reads_a_whole_number_of_one_or_more(self, value, expected):
+        environ = {} if value is None else {WORKER_INDEX_ENV: value}
+        assert read_worker_index(environ) == expected
+
+    @pytest.mark.parametrize(
+        "value", ["", "0", "-1", "+3", " 3", "1_0", "3.0", "abc", "\u0663"]
+    )
+    def test_refuses_anything_else(self, value):
+        with pytest.raises(ValueError, match=WORKER_INDEX_ENV):
+            read_worker_index({WORKER_INDEX_ENV: value})
+
+    def test_reads_the_process_environment_by_default(self, monkeypatch):
+        monkeypatch.setenv(WORKER_INDEX_ENV, "5")
+        assert read_worker_index() == 5
 
 
 class TestSupervisorRunOnce:

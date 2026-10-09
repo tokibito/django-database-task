@@ -4,16 +4,18 @@
 
 ### Added
 
-- **`pid` and `worker_index` on the worker's log records.** Under
-  `--workers`, the supervisor passes each worker its slot's index in the
-  `DJANGO_DATABASE_TASK_WORKER_INDEX` environment variable, and the worker
-  adds the index and its own pid to `Worker started`, `Worker finished`, the
-  failed broker receive and every task record, under the names the
-  supervisor's `Worker process started` and `Worker process exited` records
-  already use. The two sides of one host's logs now join on `pid`. A worker
-  started without the supervisor records its `pid` and no `worker_index`.
-  Added fields only: no logger name, message or existing field changes, so
-  existing projects need no changes.
+- **`pid` and `worker_index` on the worker's log records.** A worker reads
+  its index once at startup from the `DJANGO_DATABASE_TASK_WORKER_INDEX`
+  environment variable, a whole number of 1 or more, and adds it and its own
+  pid to `Worker started`, `Worker finished`, the failed broker receive and
+  every task record. Under `--workers` the supervisor sets the variable for
+  each worker to its slot, under the names its `Worker process started` and
+  `Worker process exited` records already use, so the two sides of one
+  host's logs join on `pid`; a process manager can set it the same way, for
+  example `%i` in a systemd template unit. A value that is not an index is
+  reported and ignored, and a worker without the variable records its `pid`
+  and no `worker_index`. Added fields only: no logger name, message or
+  existing field changes, so existing projects need no changes.
   ([#65](https://github.com/tokibito/django-database-task/issues/65))
 - **`--threads M` on `run_database_tasks`.** The worker runs M tasks at
   once in executor threads while staying one process with one polling

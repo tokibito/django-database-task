@@ -17,9 +17,9 @@ from django.tasks.base import TaskResultStatus
 from django_database_task.backends import DatabaseTaskBackend, task_log_fields
 from django_database_task.brokers import BrokerMessage
 from django_database_task.models import DatabaseTask
-from django_database_task.supervisor import WORKER_INDEX_ENV
+from django_database_task.supervisor import WORKER_INDEX_ENV, set_worker_index
 
-from .tasks import failing_task, simple_task
+from .tasks import failing_task, read_environ_task, set_environ_task, simple_task
 from .test_commands import FakePullBroker, make_backend, run_worker
 
 LOGGER_NAME = "django_database_task"
@@ -32,14 +32,21 @@ def task_logs(caplog):
     return caplog
 
 
+@pytest.fixture(autouse=True)
+def no_worker_index():
+    """The worker index is process-wide; a test that runs a worker sets it."""
+    set_worker_index(None)
+    yield
+    set_worker_index(None)
+
+
 def records_matching(caplog, fragment):
     return [r for r in caplog.records if fragment in r.getMessage()]
 
 
 @pytest.mark.django_db
 class TestTaskLogFields:
-    def test_fields_describe_the_task(self, monkeypatch):
-        monkeypatch.delenv(WORKER_INDEX_ENV, raising=False)
+    def test_fields_describe_the_task(self):
         result = simple_task.enqueue(1, 2)
         db_task = DatabaseTask.objects.get(id=result.id)
 
@@ -55,8 +62,8 @@ class TestTaskLogFields:
             "pid": os.getpid(),
         }
 
-    def test_fields_carry_the_supervisors_worker_index(self, monkeypatch):
-        monkeypatch.setenv(WORKER_INDEX_ENV, "3")
+    def test_fields_carry_the_worker_index(self):
+        set_worker_index(3)
         result = simple_task.enqueue(1, 2)
         db_task = DatabaseTask.objects.get(id=result.id)
 
@@ -65,15 +72,17 @@ class TestTaskLogFields:
         assert fields["worker_index"] == 3
         assert fields["pid"] == os.getpid()
 
-    def test_an_unreadable_worker_index_is_left_out(self, monkeypatch):
-        monkeypatch.setenv(WORKER_INDEX_ENV, "not-a-number")
+    def test_the_index_is_the_one_set_not_the_environments(self, monkeypatch):
+        """Read once at startup; a later change to the environment is not."""
+        set_worker_index(3)
+        monkeypatch.setenv(WORKER_INDEX_ENV, "7")
         result = simple_task.enqueue(1, 2)
         db_task = DatabaseTask.objects.get(id=result.id)
 
-        assert "worker_index" not in task_log_fields(db_task)
+        assert task_log_fields(db_task)["worker_index"] == 3
 
-    def test_the_join_fields_shadow_no_logrecord_attribute(self, monkeypatch):
-        monkeypatch.setenv(WORKER_INDEX_ENV, "1")
+    def test_the_join_fields_shadow_no_logrecord_attribute(self):
+        set_worker_index(1)
         result = simple_task.enqueue(1, 2)
         db_task = DatabaseTask.objects.get(id=result.id)
 
@@ -339,3 +348,49 @@ class TestWorkerLifecycleLogging:
         (record,) = records_matching(task_logs, "Error receiving from broker")
         assert record.worker_index == 4
         assert record.pid == os.getpid()
+
+    def test_a_task_changing_the_environment_does_not_change_the_index(
+        self, task_logs, monkeypatch
+    ):
+        monkeypatch.setenv(WORKER_INDEX_ENV, "2")
+        set_environ_task.enqueue(WORKER_INDEX_ENV, "9")
+        after = simple_task.enqueue(1, 2)
+
+        call_command("run_database_tasks", stdout=StringIO())
+
+        completed = records_matching(task_logs, "Task completed")
+        (record,) = [r for r in completed if r.task_id == str(after.id)]
+        assert record.worker_index == 2
+        (finished,) = records_matching(task_logs, "Worker finished")
+        assert finished.worker_index == 2
+
+    def test_tasks_can_read_the_index(self, monkeypatch):
+        """It stays in the environment for what the tasks start."""
+        monkeypatch.setenv(WORKER_INDEX_ENV, "2")
+        result = read_environ_task.enqueue(WORKER_INDEX_ENV)
+
+        call_command("run_database_tasks", stdout=StringIO())
+
+        assert DatabaseTask.objects.get(id=result.id).return_value_json == "2"
+
+    def test_an_index_that_is_not_one_is_reported_and_ignored(
+        self, task_logs, monkeypatch
+    ):
+        monkeypatch.setenv(WORKER_INDEX_ENV, "-1")
+        out = StringIO()
+
+        call_command("run_database_tasks", stdout=out)
+
+        (warning,) = records_matching(task_logs, "Ignoring the worker index")
+        assert warning.levelno == logging.WARNING
+        assert "Ignoring the worker index" in out.getvalue()
+        (record,) = records_matching(task_logs, "Worker started")
+        assert not hasattr(record, "worker_index")
+
+    def test_the_index_is_shown_with_the_worker_id(self, monkeypatch):
+        monkeypatch.setenv(WORKER_INDEX_ENV, "2")
+        out = StringIO()
+
+        call_command("run_database_tasks", stdout=out)
+
+        assert "Worker index: 2" in out.getvalue()
