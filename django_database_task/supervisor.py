@@ -219,6 +219,13 @@ class _Worker:
     retiring: bool = False
     #: The pid of the last process, kept for the exit message.
     pid: int | None = None
+    #: The exit code of the last process.
+    exit_code: int | None = None
+    #: The restart now due follows an abnormal exit; counted when it starts.
+    restart_after_abnormal: bool = False
+    #: When a process last exited with code 0 of its own accord, on the
+    #: monotonic clock.
+    clean_exit_at: float | None = None
 
     @property
     def running(self):
@@ -289,6 +296,11 @@ class WorkerSupervisor:
         self._exit_codes = []
         self._forced = False
         self._pending_scale = 0
+        self._restarts = 0
+        self._abnormal_restarts = 0
+        #: When every worker started failing, on the monotonic clock; None
+        #: while at least one is not.
+        self._failing_since = None
         self._scaling_handlers = {}
         self._shutdown = GracefulShutdown(
             timeout=0,
@@ -366,6 +378,9 @@ class WorkerSupervisor:
         while not self._shutdown.is_set():
             self._apply_scaling()
             self._reap()
+            # Before the restarts, so that a recovery by a clean exit names
+            # the process that exited rather than its replacement.
+            self._check_failing()
             self._start_due()
             if not any(
                 worker.running or worker.restart_at is not None
@@ -432,6 +447,10 @@ class WorkerSupervisor:
             kwargs = {"process_group": 0}
         env = {**os.environ, WORKER_INDEX_ENV: str(worker.index)}
         worker.process = subprocess.Popen(self.args, env=env, **kwargs)
+        if worker.pid is not None:
+            self._restarts += 1
+            if worker.restart_after_abnormal:
+                self._abnormal_restarts += 1
         worker.pid = worker.process.pid
         worker.started_at = time.monotonic()
         worker.restart_at = None
@@ -457,6 +476,10 @@ class WorkerSupervisor:
             asked_to_stop = self._shutdown.is_set() or worker.retiring
             stopped = asked_to_stop and _exited_on_signal(code)
             self._exit_codes.append(0 if stopped else code)
+            worker.exit_code = code
+            worker.restart_after_abnormal = self._abnormal(code, stopped)
+            if code == 0 and not stopped:
+                worker.clean_exit_at = now
 
             if worker.retiring:
                 self._workers.remove(worker)
@@ -467,6 +490,71 @@ class WorkerSupervisor:
                 delay = self._restart_delay(worker, code, uptime)
                 worker.restart_at = now + delay
             self._report_exit(worker, code, uptime, delay, stopped)
+
+    def _abnormal(self, code, stopped):
+        return not stopped and code not in (0, self.empty_exit_code)
+
+    def _is_failing(self, worker, now):
+        """
+        True if the slot's last process failed to start and none has since
+        run past ``stable_after``: the slot is waiting out a back-off, or
+        the process it restarted has not yet shown it will stay up.
+        """
+        return worker.failures > 0 and not self._is_stable(worker, now)
+
+    def _is_stable(self, worker, now):
+        """True if the slot's process has run past ``stable_after``."""
+        return worker.running and now - worker.started_at >= self.stable_after
+
+    def _check_failing(self):
+        """
+        Report when every worker is failing to start, and when one recovers.
+
+        One worker that keeps failing is that worker's problem, and its exit
+        records say so. All of them failing at once is a misconfiguration
+        or a dependency that is down, which is worth one record of its own.
+        It is cleared once a worker has run past ``stable_after`` again, or
+        has exited with code 0 since: a worker that reaches ``--max-tasks``
+        sooner than that is working, not failing.
+        """
+        now = time.monotonic()
+        active = [worker for worker in self._workers if not worker.retiring]
+        if self._failing_since is None:
+            if active and all(self._is_failing(worker, now) for worker in active):
+                self._failing_since = now
+                logger.warning(
+                    "Every worker is failing to start: workers=%d",
+                    len(active),
+                    extra={
+                        "workers": len(active),
+                        "exit_codes": [worker.exit_code for worker in active],
+                    },
+                )
+            return
+        for worker in active:
+            if self._is_stable(worker, now):
+                recovered_by = "uptime"
+            elif (
+                worker.clean_exit_at is not None
+                and worker.clean_exit_at >= self._failing_since
+            ):
+                recovered_by = "clean_exit"
+            else:
+                continue
+            failing_for = now - self._failing_since
+            self._failing_since = None
+            logger.info(
+                "Workers recovered: index=%d pid=%d",
+                worker.index,
+                worker.pid,
+                extra={
+                    "worker_index": worker.index,
+                    "pid": worker.pid,
+                    "failing_for": failing_for,
+                    "recovered_by": recovered_by,
+                },
+            )
+            return
 
     def _restart_delay(self, worker, code, uptime):
         if code == 0 or uptime >= self.stable_after:
@@ -571,7 +659,12 @@ class WorkerSupervisor:
         logger.info(
             "Supervisor finished: exit_code=%d",
             code,
-            extra={"exit_code": code, "exit_codes": list(self._exit_codes)},
+            extra={
+                "exit_code": code,
+                "exit_codes": list(self._exit_codes),
+                "restarts": self._restarts,
+                "abnormal_restarts": self._abnormal_restarts,
+            },
         )
         return code
 
@@ -653,7 +746,7 @@ class WorkerSupervisor:
         )
 
     def _report_exit(self, worker, code, uptime, delay, stopped):
-        abnormal = not stopped and code not in (0, self.empty_exit_code)
+        abnormal = self._abnormal(code, stopped)
         message = f"Worker {worker.index} (pid {worker.pid}) exited"
         if stopped:
             message += " on the shutdown signal."

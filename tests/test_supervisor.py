@@ -102,6 +102,54 @@ sys.exit(int(sys.argv[3]))
 )
 
 
+# Exits with 1 for its first argv[3] launches, counted by the ready files,
+# then stays up until signalled.
+FAILS_THEN_STAYS_UP_WORKER = (
+    PRELUDE
+    + """
+mark(ready)
+if len(os.listdir(ready)) <= int(sys.argv[3]):
+    sys.exit(1)
+asked = False
+def handler(signum, frame):
+    global asked
+    asked = True
+install(handler)
+while not asked:
+    time.sleep(0.02)
+"""
+)
+
+# Exits with 1 for its first argv[3] launches, then with 0.
+FAILS_THEN_EXITS_CLEANLY_WORKER = (
+    PRELUDE
+    + """
+mark(ready)
+sys.exit(1 if len(os.listdir(ready)) <= int(sys.argv[3]) else 0)
+"""
+)
+
+# The first worker to start stays up until signalled; every other one exits
+# with 1.
+ONE_STAYS_UP_WORKER = (
+    PRELUDE
+    + """
+mark(ready)
+try:
+    os.close(os.open(os.path.join(stopped, "first"), os.O_CREAT | os.O_EXCL))
+except FileExistsError:
+    sys.exit(1)
+asked = False
+def handler(signum, frame):
+    global asked
+    asked = True
+install(handler)
+while not asked:
+    time.sleep(0.02)
+"""
+)
+
+
 def wait_for(condition, timeout=20, what="condition"):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -384,6 +432,187 @@ class TestSupervisorJoinsTheWorkersLogs:
         harness.start().join()
 
         assert WORKER_INDEX_ENV not in os.environ
+
+
+def messages_starting(caplog, prefix):
+    return [r for r in caplog.records if r.getMessage().startswith(prefix)]
+
+
+class TestSupervisorState:
+    def test_every_worker_failing_is_reported_once(self, tmp_path, caplog):
+        harness = Harness(
+            tmp_path,
+            EXITING_WORKER,
+            1,
+            workers=2,
+            restart=True,
+            backoff_start=0.05,
+            backoff_max=0.1,
+            stable_after=60,
+        )
+        with caplog.at_level(logging.INFO, logger="django_database_task"):
+            harness.start()
+            harness.wait_exits(6)
+            harness.supervisor.request_shutdown()
+            harness.join()
+
+        (record,) = messages_starting(caplog, "Every worker is failing to start")
+        assert record.levelno == logging.WARNING
+        assert record.workers == 2
+        assert record.exit_codes == [1, 1]
+        assert not messages_starting(caplog, "Workers recovered")
+
+    def test_one_worker_failing_is_not_every_worker(self, tmp_path, caplog):
+        harness = Harness(
+            tmp_path,
+            ONE_STAYS_UP_WORKER,
+            workers=2,
+            restart=True,
+            backoff_start=0.05,
+            backoff_max=0.1,
+            stable_after=60,
+        )
+        with caplog.at_level(logging.INFO, logger="django_database_task"):
+            harness.start()
+            harness.wait_exits(4)
+            harness.supervisor.request_shutdown()
+            harness.join()
+
+        assert not messages_starting(caplog, "Every worker is failing to start")
+
+    def test_a_worker_past_the_stable_window_clears_it(self, tmp_path, caplog):
+        harness = Harness(
+            tmp_path,
+            FAILS_THEN_STAYS_UP_WORKER,
+            2,
+            workers=1,
+            restart=True,
+            backoff_start=0.05,
+            backoff_max=0.1,
+            stable_after=0.5,
+        )
+        with caplog.at_level(logging.INFO, logger="django_database_task"):
+            harness.start()
+            wait_for(
+                lambda: messages_starting(caplog, "Workers recovered"),
+                what="the recovery record",
+            )
+            (running,) = harness.supervisor.running_pids
+            harness.supervisor.request_shutdown()
+            harness.join()
+
+        (failing,) = messages_starting(caplog, "Every worker is failing to start")
+        (recovered,) = messages_starting(caplog, "Workers recovered")
+        assert caplog.records.index(failing) < caplog.records.index(recovered)
+        assert recovered.levelno == logging.INFO
+        assert recovered.worker_index == 1
+        assert recovered.pid == running
+        assert recovered.failing_for >= 0.5
+        assert recovered.recovered_by == "uptime"
+
+    def test_a_clean_exit_clears_it(self, tmp_path, caplog):
+        """A worker reaching --max-tasks quickly is working, not failing."""
+        harness = Harness(
+            tmp_path,
+            FAILS_THEN_EXITS_CLEANLY_WORKER,
+            2,
+            workers=1,
+            restart=True,
+            backoff_start=0.05,
+            backoff_max=0.1,
+            stable_after=60,
+        )
+        with caplog.at_level(logging.INFO, logger="django_database_task"):
+            harness.start()
+            wait_for(
+                lambda: messages_starting(caplog, "Workers recovered"),
+                what="the recovery record",
+            )
+            harness.supervisor.request_shutdown()
+            harness.join()
+
+        (failing,) = messages_starting(caplog, "Every worker is failing to start")
+        (recovered,) = messages_starting(caplog, "Workers recovered")
+        clean_exits = [
+            record
+            for record in messages_starting(caplog, "Worker process exited")
+            if record.exit_code == 0
+        ]
+        assert caplog.records.index(failing) < caplog.records.index(recovered)
+        assert recovered.recovered_by == "clean_exit"
+        assert recovered.pid == clean_exits[0].pid
+
+    def test_a_new_slot_is_not_a_recovery(self, tmp_path, caplog):
+        harness = Harness(
+            tmp_path,
+            EXITING_WORKER,
+            1,
+            workers=1,
+            restart=True,
+            backoff_start=0.05,
+            backoff_max=0.1,
+            stable_after=60,
+        )
+        with caplog.at_level(logging.INFO, logger="django_database_task"):
+            harness.start()
+            wait_for(
+                lambda: messages_starting(caplog, "Every worker is failing"),
+                what="the failing record",
+            )
+            harness.supervisor.add_worker()
+            harness.wait_exits(6)
+            harness.supervisor.request_shutdown()
+            harness.join()
+
+        assert not messages_starting(caplog, "Workers recovered")
+
+    def test_finish_counts_the_restarts(self, tmp_path, caplog):
+        harness = Harness(
+            tmp_path,
+            EXITING_WORKER,
+            1,
+            workers=1,
+            restart=True,
+            backoff_start=0.05,
+            backoff_max=0.05,
+            stable_after=60,
+        )
+        with caplog.at_level(logging.INFO, logger="django_database_task"):
+            harness.start()
+            harness.wait_exits(3)
+            harness.supervisor.request_shutdown()
+            harness.join()
+
+        (record,) = messages_starting(caplog, "Supervisor finished")
+        started = messages_starting(caplog, "Worker process started")
+        assert record.restarts == len(started) - 1
+        assert record.restarts >= 2
+        assert record.abnormal_restarts == record.restarts
+
+    def test_a_clean_exit_is_not_an_abnormal_restart(self, tmp_path, caplog):
+        harness = Harness(
+            tmp_path, EXITING_WORKER, 0, workers=1, restart=True, stable_after=60
+        )
+        with caplog.at_level(logging.INFO, logger="django_database_task"):
+            harness.start()
+            harness.wait_exits(3)
+            harness.supervisor.request_shutdown()
+            harness.join()
+
+        (record,) = messages_starting(caplog, "Supervisor finished")
+        assert record.restarts >= 2
+        assert record.abnormal_restarts == 0
+        assert not messages_starting(caplog, "Every worker is failing to start")
+
+    def test_a_run_once_supervisor_restarts_nothing(self, tmp_path, caplog):
+        harness = Harness(tmp_path, EXITING_WORKER, 3, workers=2, restart=False)
+        with caplog.at_level(logging.INFO, logger="django_database_task"):
+            harness.start().join()
+
+        (record,) = messages_starting(caplog, "Supervisor finished")
+        assert record.restarts == 0
+        assert record.abnormal_restarts == 0
+        assert not messages_starting(caplog, "Every worker is failing to start")
 
 
 class TestSupervisorShutdown:
