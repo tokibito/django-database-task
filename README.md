@@ -752,9 +752,12 @@ Shutdown complete: every worker exited.
   spin. When every worker is failing that way at once, which points at the
   configuration or a dependency that is down rather than at one bad worker,
   the supervisor logs one `Every worker is failing to start` WARNING, with
-  `workers` and the last `exit_codes`, and a `Workers recovered` INFO, with
-  `worker_index`, `pid` and `failing_for` in seconds, once a worker has run
-  past the ten seconds again. `Supervisor finished` carries `restarts`, how
+  `workers` and the last `exit_codes`. It logs one `Workers recovered` INFO
+  once a worker has run for ten seconds again, or has exited with code 0, as
+  a worker that reaches `--max-tasks` sooner does; the record carries
+  `worker_index`, `pid`, `failing_for` in seconds, and `recovered_by`
+  (`uptime` or `clean_exit`). A slot added with `SIGTTIN` does not count
+  until it has done one of the two. `Supervisor finished` carries `restarts`, how
   many workers were started in place of one that exited, and
   `abnormal_restarts`, how many of those followed an exit with a code other
   than 0 or `--empty-exit-code`. Without `--continuous` each worker drains the

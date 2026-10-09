@@ -223,6 +223,9 @@ class _Worker:
     exit_code: int | None = None
     #: The restart now due follows an abnormal exit; counted when it starts.
     restart_after_abnormal: bool = False
+    #: When a process last exited with code 0 of its own accord, on the
+    #: monotonic clock.
+    clean_exit_at: float | None = None
 
     @property
     def running(self):
@@ -375,8 +378,10 @@ class WorkerSupervisor:
         while not self._shutdown.is_set():
             self._apply_scaling()
             self._reap()
-            self._start_due()
+            # Before the restarts, so that a recovery by a clean exit names
+            # the process that exited rather than its replacement.
             self._check_failing()
+            self._start_due()
             if not any(
                 worker.running or worker.restart_at is not None
                 for worker in self._workers
@@ -473,6 +478,8 @@ class WorkerSupervisor:
             self._exit_codes.append(0 if stopped else code)
             worker.exit_code = code
             worker.restart_after_abnormal = self._abnormal(code, stopped)
+            if code == 0 and not stopped:
+                worker.clean_exit_at = now
 
             if worker.retiring:
                 self._workers.remove(worker)
@@ -506,7 +513,9 @@ class WorkerSupervisor:
         One worker that keeps failing is that worker's problem, and its exit
         records say so. All of them failing at once is a misconfiguration
         or a dependency that is down, which is worth one record of its own.
-        It is cleared once a worker has run past ``stable_after`` again.
+        It is cleared once a worker has run past ``stable_after`` again, or
+        has exited with code 0 since: a worker that reaches ``--max-tasks``
+        sooner than that is working, not failing.
         """
         now = time.monotonic()
         active = [worker for worker in self._workers if not worker.retiring]
@@ -522,23 +531,30 @@ class WorkerSupervisor:
                     },
                 )
             return
-        recovered = next(
-            (worker for worker in active if self._is_stable(worker, now)), None
-        )
-        if recovered is None:
+        for worker in active:
+            if self._is_stable(worker, now):
+                recovered_by = "uptime"
+            elif (
+                worker.clean_exit_at is not None
+                and worker.clean_exit_at >= self._failing_since
+            ):
+                recovered_by = "clean_exit"
+            else:
+                continue
+            failing_for = now - self._failing_since
+            self._failing_since = None
+            logger.info(
+                "Workers recovered: index=%d pid=%d",
+                worker.index,
+                worker.pid,
+                extra={
+                    "worker_index": worker.index,
+                    "pid": worker.pid,
+                    "failing_for": failing_for,
+                    "recovered_by": recovered_by,
+                },
+            )
             return
-        failing_for = now - self._failing_since
-        self._failing_since = None
-        logger.info(
-            "Workers recovered: index=%d pid=%d",
-            recovered.index,
-            recovered.pid,
-            extra={
-                "worker_index": recovered.index,
-                "pid": recovered.pid,
-                "failing_for": failing_for,
-            },
-        )
 
     def _restart_delay(self, worker, code, uptime):
         if code == 0 or uptime >= self.stable_after:
