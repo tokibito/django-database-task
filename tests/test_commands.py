@@ -1,6 +1,8 @@
 """Tests for management commands."""
 
 import os
+import random
+import re
 import signal
 import sqlite3
 import subprocess
@@ -154,6 +156,94 @@ class TestRunDatabaseTasks:
         call_command("run_database_tasks", stdout=out)
 
         assert "No more tasks to process" in out.getvalue()
+
+
+@pytest.mark.django_db
+class TestRunDatabaseTasksMaxTasksJitter:
+    """--max-tasks-jitter: a random addition to --max-tasks, drawn per worker."""
+
+    def run(self, drawn=0, **options):
+        out = StringIO()
+        with patch("random.SystemRandom.randint", return_value=drawn) as randint:
+            call_command("run_database_tasks", stdout=out, **options)
+        return out.getvalue(), randint
+
+    def test_the_drawn_value_is_added_to_max_tasks(self):
+        for i in range(5):
+            simple_task.enqueue(i, i)
+
+        output, randint = self.run(drawn=2, max_tasks=1, max_tasks_jitter=3)
+
+        randint.assert_called_once_with(0, 3)
+        assert "Max tasks: 3 (1 + jitter 2 of up to 3)" in output
+        assert "Reached max tasks limit: 3" in output
+        assert (
+            DatabaseTask.objects.filter(status=TaskResultStatus.SUCCESSFUL).count() == 3
+        )
+        assert DatabaseTask.objects.filter(status=TaskResultStatus.READY).count() == 2
+
+    def test_a_draw_of_zero_leaves_max_tasks_as_it_is(self):
+        for i in range(3):
+            simple_task.enqueue(i, i)
+
+        output, _ = self.run(drawn=0, max_tasks=2, max_tasks_jitter=3)
+
+        assert "Max tasks: 2 (2 + jitter 0 of up to 3)" in output
+        assert (
+            DatabaseTask.objects.filter(status=TaskResultStatus.SUCCESSFUL).count() == 2
+        )
+
+    def test_the_default_is_no_jitter(self):
+        """Without the option --max-tasks is what it has always been."""
+        output, randint = self.run(max_tasks=2)
+
+        randint.assert_called_once_with(0, 0)
+        assert "Max tasks: 2\n" in output
+        assert "jitter" not in output
+
+    def test_jitter_without_max_tasks_is_ignored(self):
+        """Unlimited stays unlimited, as with gunicorn's max_requests_jitter."""
+        for i in range(3):
+            simple_task.enqueue(i, i)
+
+        output, randint = self.run(drawn=1, max_tasks_jitter=5)
+
+        randint.assert_not_called()
+        assert "Max tasks" not in output
+        assert (
+            DatabaseTask.objects.filter(status=TaskResultStatus.SUCCESSFUL).count() == 3
+        )
+
+    def test_a_seeded_random_module_does_not_make_the_draws_alike(self):
+        """A project that seeds random at import must not undo the jitter."""
+        drawn = []
+        state = random.getstate()
+        try:
+            for _ in range(2):
+                random.seed(0)
+                out = StringIO()
+                call_command(
+                    "run_database_tasks",
+                    max_tasks=1,
+                    max_tasks_jitter=10**9,
+                    stdout=out,
+                )
+                drawn.append(re.search(r"Max tasks: (\d+)", out.getvalue())[1])
+        finally:
+            random.setstate(state)
+
+        assert drawn[0] != drawn[1]
+
+    def test_jitter_must_not_be_negative(self):
+        with pytest.raises(
+            CommandError, match="--max-tasks-jitter must not be negative"
+        ):
+            call_command(
+                "run_database_tasks",
+                max_tasks=1,
+                max_tasks_jitter=-1,
+                stdout=StringIO(),
+            )
 
 
 @posix_signals
@@ -1374,6 +1464,12 @@ class TestRunDatabaseTasksWorkers:
         with pytest.raises(SystemExit) as exc_info:
             self.run_workers(code=1, workers=2, failed_exit_code=1)
         assert exc_info.value.code == 1
+
+    def test_the_jitter_is_drawn_by_each_worker_not_the_supervisor(self):
+        with patch("random.SystemRandom.randint") as randint:
+            self.run_workers(workers=2, max_tasks=10, max_tasks_jitter=5)
+
+        randint.assert_not_called()
 
     def test_a_normal_exit_of_every_worker_exits_normally(self):
         self.run_workers(code=0, workers=2, empty_exit_code=4, failed_exit_code=1)

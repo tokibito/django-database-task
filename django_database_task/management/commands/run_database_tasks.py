@@ -1,6 +1,7 @@
 import argparse
 import functools
 import logging
+import random
 import socket
 import sys
 import threading
@@ -97,6 +98,18 @@ class Command(BaseCommand):
             type=int,
             default=0,
             help=_("Maximum number of tasks to process (0=unlimited, default: 0)"),
+        )
+        parser.add_argument(
+            "--max-tasks-jitter",
+            type=int,
+            default=0,
+            metavar="J",
+            help=_(
+                "Add a random number from 0 to this to --max-tasks, drawn once "
+                "when the worker starts, so workers started together do not "
+                "all reach the limit at once. Ignored without --max-tasks "
+                "(default: 0)"
+            ),
         )
         parser.add_argument(
             "--source",
@@ -214,6 +227,9 @@ class Command(BaseCommand):
         threads = options["threads"]
         if threads < 1:
             raise CommandError("--threads must be at least 1")
+        max_tasks_jitter = options["max_tasks_jitter"]
+        if max_tasks_jitter < 0:
+            raise CommandError("--max-tasks-jitter must not be negative")
 
         backend = task_backends[backend_name]
         source = self._resolve_source(backend, options["source"])
@@ -226,6 +242,12 @@ class Command(BaseCommand):
 
         worker_id = f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
         worker_index = self._read_worker_index()
+        # Drawn here, in the worker, rather than by the --workers supervisor,
+        # so that every worker and every restart gets a value of its own; and
+        # from the OS rather than the random module's shared generator, which
+        # a project that seeds it at import would make draw alike everywhere.
+        jitter = random.SystemRandom().randint(0, max_tasks_jitter) if max_tasks else 0
+        max_tasks += jitter
         if verbosity >= 1:
             self.stdout.write(f"Worker ID: {worker_id}")
             if worker_index is not None:
@@ -243,7 +265,12 @@ class Command(BaseCommand):
                     f"Broker: {type(backend.broker).__name__} "
                     f"(wait={wait_time}s, max_messages={max_messages})"
                 )
-            if max_tasks:
+            if max_tasks and max_tasks_jitter:
+                self.stdout.write(
+                    f"Max tasks: {max_tasks} ({options['max_tasks']} + jitter "
+                    f"{jitter} of up to {max_tasks_jitter})"
+                )
+            elif max_tasks:
                 self.stdout.write(f"Max tasks: {max_tasks}")
             if graceful:
                 timeout_label = (
@@ -275,6 +302,7 @@ class Command(BaseCommand):
                 "queue_name": queue_name,
                 "continuous": continuous,
                 "threads": threads,
+                "max_tasks": max_tasks,
                 **worker_log_fields(),
             },
         )

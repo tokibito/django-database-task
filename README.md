@@ -256,6 +256,7 @@ python manage.py run_database_tasks [options]
 | `--continuous` | Keep polling even when no tasks |
 | `--interval` | Polling interval in seconds (default: 5) |
 | `--max-tasks` | Maximum number of tasks to process (0=unlimited) |
+| `--max-tasks-jitter` | Add a random number from 0 to this to `--max-tasks`, drawn once per worker at start (default: 0). Ignored without `--max-tasks`. See [Running several workers](#running-several-workers) |
 | `--source` | Where to look for tasks: `auto` (default), `db`, `broker` or `both`. See [Task sources](#task-sources) |
 | `--wait-time` | Seconds to wait for a broker message before looking again (default: 20) |
 | `--max-messages` | Maximum number of broker messages to receive at a time (default: 1) |
@@ -766,7 +767,24 @@ Shutdown complete: every worker exited.
   time.
 - **`--max-tasks`** goes to each worker. With `--continuous` that is
   gunicorn's `max_requests`: a worker exits after that many tasks and is
-  replaced, which bounds a leak in task code.
+  replaced, which bounds a leak in task code. The N workers start together
+  and process at similar rates, so on their own they reach the limit at
+  about the same time and restart together, leaving the host without a
+  worker for that moment. Add `--max-tasks-jitter J`, gunicorn's
+  `max_requests_jitter`, to spread them out: each worker draws a number
+  from 0 to J when it starts, a restarted one included, and stops after
+  `--max-tasks` plus that many tasks. A jitter of a tenth of `--max-tasks`
+  or more is a reasonable start:
+
+  ```bash
+  python manage.py run_database_tasks --continuous --workers 4 \
+      --max-tasks 1000 --max-tasks-jitter 100
+  ```
+
+  The limit a worker drew is printed at startup
+  (`Max tasks: 1037 (1000 + jitter 37 of up to 100)`) and carried as
+  `max_tasks` on its `Worker started` log record. A worker run by a process
+  manager rather than `--workers` takes the option the same way.
 - **Signals.** `SIGTERM` and `SIGINT` (Ctrl-Break too on Windows) are handled
   by the supervisor, which forwards them to every worker and waits for the
   workers to finish their running task, within `--shutdown-timeout` if one is
