@@ -4,6 +4,18 @@
 
 ### Added
 
+- **`--max-tasks-jitter J` on `run_database_tasks`.** Each worker adds a
+  random number from 0 to J, drawn once when it starts, to `--max-tasks`,
+  the way gunicorn's `max_requests_jitter` does, so the workers of
+  `--workers N --continuous --max-tasks K` no longer all reach K and restart
+  at the same moment. The draw is made by the worker, so every worker and
+  every restart gets its own, and from the operating system's random source,
+  so a project that seeds `random` does not make them alike; the limit drawn is printed at startup and
+  carried as a new `max_tasks` field on `Worker started`. Without
+  `--max-tasks` the option is ignored. The default is 0, which leaves
+  `--max-tasks` exactly as it was, and the only change to existing output is
+  the added log field, so existing projects need no changes.
+  ([#64](https://github.com/tokibito/django-database-task/issues/64))
 - **A summary of the `--workers` supervisor's state in its log records.**
   When every worker is exiting with an error within ten seconds of starting
   at once, the supervisor logs one `Every worker is failing to start`

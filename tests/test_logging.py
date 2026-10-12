@@ -275,6 +275,20 @@ class TestWorkerLifecycleLogging:
         assert record.source == "db"
         assert record.queue_name == "emails"
         assert record.continuous is False
+        assert record.max_tasks == 0
+
+    def test_start_carries_the_max_tasks_with_the_jitter_drawn(self, task_logs):
+        """The drawn jitter is otherwise invisible to a fleet's logs."""
+        with patch("random.SystemRandom.randint", return_value=7):
+            call_command(
+                "run_database_tasks",
+                max_tasks=100,
+                max_tasks_jitter=10,
+                stdout=StringIO(),
+            )
+
+        (record,) = records_matching(task_logs, "Worker started")
+        assert record.max_tasks == 107
 
     def test_a_failed_receive_is_logged_with_the_worker_fields(self, task_logs):
         class BrokenBroker(FakePullBroker):
